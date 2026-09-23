@@ -5,12 +5,12 @@
 // Conversation text is deliberately not exposed here, only counts and memory.
 // Copyright (c) 2026 PacificAI. All rights reserved.
 import http from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ready as dbReady, one, many, query } from '../lib/db.js';
-import { sha256, safeEqual, tooManyFails, recordFail, clearFails, cookieValue } from '../lib/auth.js';
+import { sha256, safeEqual, tooManyFails, recordFail, clearFails, cookieValue, signupMode, SIGNUP_MODES } from '../lib/auth.js';
 import { PERSONAS } from '../lib/personas.js';
 
 const PORT = Number(process.env.ADMIN_PORT) || 3001;
@@ -116,7 +116,11 @@ async function listUsers(q) {
 }
 
 async function userDetail(id) {
-  const user = await one('SELECT id, name, email, disabled, created_at, last_seen_at FROM users WHERE id = $1', [id]);
+  const user = await one(
+    `SELECT u.id, u.name, u.email, u.disabled, u.created_at, u.last_seen_at, i.code AS invite_code, i.label AS invite_label
+       FROM users u LEFT JOIN invite_codes i ON i.id = u.invite_code_id WHERE u.id = $1`,
+    [id],
+  );
   if (!user) return null;
   const [memory, personas, sessions] = await Promise.all([
     one('SELECT data, updated_at FROM memory WHERE user_id = $1', [id]),
@@ -133,6 +137,48 @@ async function userDetail(id) {
     personas: personas.map((p) => ({ ...p, name: names[p.persona] || p.persona })),
     sessions,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Invite codes and sign-up mode
+// ---------------------------------------------------------------------------
+const WORDS = 'amber,cedar,comet,coral,ember,falcon,fern,harbor,koala,lotus,mango,maple,meadow,nova,orbit,otter,pixel,river,saffron,tiger,willow,zebra'.split(',');
+const newCode = () => `crew-${[0, 1, 2].map(() => WORDS[randomInt(WORDS.length)]).join('-')}-${randomInt(100, 1000)}`;
+
+async function listInvites() {
+  return many(
+    `SELECT i.id, i.code, i.label, i.max_uses, i.uses, i.expires_at, i.disabled, i.created_by, i.created_at, i.last_used_at,
+            (i.expires_at IS NOT NULL AND i.expires_at <= now()) AS expired,
+            COALESCE(array_agg(u.name ORDER BY u.created_at) FILTER (WHERE u.id IS NOT NULL), '{}') AS joined
+       FROM invite_codes i LEFT JOIN users u ON u.invite_code_id = i.id
+      GROUP BY i.id
+      ORDER BY i.disabled, i.created_at DESC`,
+  );
+}
+
+async function createInvite(admin, body) {
+  const label = String(body.label || '').trim().slice(0, 60);
+  const maxUses = body.max_uses ? Number(body.max_uses) : null;
+  const days = body.expires_days ? Number(body.expires_days) : null;
+  if (maxUses !== null && !(Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 100000)) throw new Error('Max uses must be a whole number from 1 up.');
+  if (days !== null && !(days > 0 && days <= 3650)) throw new Error('Expiry must be between 1 and 3650 days.');
+  let code = String(body.code || '').trim();
+  if (code && !/^[A-Za-z0-9_-]{6,40}$/.test(code)) throw new Error('A custom code needs 6–40 letters, digits, - or _.');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const tryCode = code || newCode();
+    try {
+      return await one(
+        `INSERT INTO invite_codes (code, label, max_uses, expires_at, created_by)
+         VALUES ($1, $2, $3, CASE WHEN $4::float IS NULL THEN NULL ELSE now() + make_interval(days => $4::int) END, $5)
+         RETURNING id, code`,
+        [tryCode, label, maxUses, days, admin],
+      );
+    } catch (err) {
+      if (err.code !== '23505') throw err;
+      if (code) throw new Error('That code already exists.');
+    }
+  }
+  throw new Error("Couldn't generate a unique code; try again.");
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +221,44 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/users' && req.method === 'GET') {
     const q = new URL(req.url, 'http://x').searchParams.get('q')?.trim().slice(0, 100) || null;
     return send(res, 200, { users: await listUsers(q) });
+  }
+  if (pathname === '/api/invites' && req.method === 'GET') {
+    return send(res, 200, { mode: await signupMode(), invites: await listInvites() });
+  }
+  if (pathname === '/api/invites' && req.method === 'POST') {
+    try {
+      const created = await createInvite(admin, await readJson(req));
+      await audit(admin, 'create_invite', created.code);
+      return send(res, 200, created);
+    } catch (err) {
+      return send(res, 400, { error: err.message });
+    }
+  }
+  if (pathname === '/api/settings/signup-mode' && req.method === 'POST') {
+    const { mode } = await readJson(req);
+    if (!SIGNUP_MODES.includes(mode)) return send(res, 400, { error: 'Unknown mode.' });
+    await query(
+      `INSERT INTO settings (key, value, updated_at) VALUES ('signup_mode', $1, now())
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`,
+      [mode],
+    );
+    await audit(admin, 'signup_mode', mode);
+    return send(res, 200, { mode });
+  }
+  const inv = pathname.match(/^\/api\/invites\/(\d+)(?:\/(disable|enable))?$/);
+  if (inv) {
+    const invite = await one('SELECT id, code FROM invite_codes WHERE id = $1', [Number(inv[1])]);
+    if (!invite) return send(res, 404, { error: 'No such invite code.' });
+    if (!inv[2] && req.method === 'DELETE') {
+      await query('DELETE FROM invite_codes WHERE id = $1', [invite.id]); // users keep their accounts
+      await audit(admin, 'delete_invite', invite.code);
+      return send(res, 200, { ok: true });
+    }
+    if (inv[2] && req.method === 'POST') {
+      await query('UPDATE invite_codes SET disabled = $1 WHERE id = $2', [inv[2] === 'disable', invite.id]);
+      await audit(admin, `${inv[2]}_invite`, invite.code);
+      return send(res, 200, { ok: true });
+    }
   }
   if (pathname === '/api/audit') {
     return send(res, 200, { entries: await many('SELECT at, admin, action, target, detail FROM admin_audit ORDER BY id DESC LIMIT 200') });

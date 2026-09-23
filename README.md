@@ -90,13 +90,12 @@ The mic, camera and AR need **HTTPS** (or `localhost`). Pick one:
 - **USB (Android):** run `adb reverse tcp:3000 tcp:3000`, then open `http://localhost:3000` in Chrome on the phone.
 - **Your own certificate:** `SSL_KEY=key.pem SSL_CERT=cert.pem npm start`.
 
-**Before sharing a link, set an invite code.** Otherwise anyone who finds the URL can create an account and use your machine. Put it in a `.env` file in the project folder (gitignored; `npm start` loads it):
+**Control who can sign up before you share a link.** Otherwise anyone who finds the URL can create an account and use your machine. In the admin panel's **Invites** tab:
+- choose **Invite only**, **Open** or **Closed** (existing users can always sign in)
+- create codes with a label, a max number of people and an expiry, then copy them to share
+- disable or delete codes, and see who joined with each one
 
-```sh
-INVITE_CODE=crew-some-secret-words-123     # several codes: separate with commas
-```
-
-Restart the server, and new sign-ups must enter the code. Existing users sign in as usual. Remove a code and restart to stop new sign-ups with it. Links shared into the app can't reach private or local network addresses.
+Changes apply immediately, with no restart. Any `INVITE_CODE` in `.env` is imported on startup, so a fresh install is invite-only from the first run. Links shared into the app can't reach private or local network addresses.
 
 ## Configuration
 
@@ -115,7 +114,7 @@ Restart the server, and new sign-ups must enter the code. Existing users sign in
 | `NCERT_DB` | `data/chroma` | ChromaDB folder for the textbooks |
 | `DATABASE_URL` | `postgres://hellocrew:…@127.0.0.1:5433/hellocrew` | PostgreSQL for accounts and memory (set automatically in Docker) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / none | Admin panel login. The password must be 12+ characters |
-| `INVITE_CODE` | none (open sign-up) | Code(s) needed to create an account, comma-separated. Set this before sharing a link |
+| `INVITE_CODE` | none | Invite code(s) imported on startup, comma-separated. Manage codes and the sign-up mode in the admin panel |
 | `DEBUG_CHAT` | off | Log Kiki's extracted study context |
 | `SSL_KEY` / `SSL_CERT` | none | Serve HTTPS directly |
 

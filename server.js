@@ -13,7 +13,7 @@ import { PERSONAS, publicPersona } from './lib/personas.js';
 import { respond, CHAT_MODEL } from './lib/chat.js';
 import { addDocument, listDocuments, removeDocument, EMBED_MODEL } from './lib/rag.js';
 import { fetchPage } from './lib/web.js';
-import { AuthError, signUp, logIn, renameUser, createSession, userFromRequest, endSession, inviteRequired } from './lib/auth.js';
+import { AuthError, signUp, logIn, renameUser, createSession, userFromRequest, endSession, signupMode, seedInvites } from './lib/auth.js';
 import { getHistory, addMessage, historyCounts, getMemory, forget, eraseAll, saveStudy, learnFromTurn, memoryNote, greetingFor } from './lib/memory.js';
 import { ready as dbReady, query } from './lib/db.js';
 
@@ -230,7 +230,7 @@ function clientIp(req) {
 
 async function handleAuth(req, res, action) {
   if (action === 'me' && req.method === 'GET') {
-    return sendJson(res, 200, { user: await userFromRequest(req), inviteRequired: inviteRequired() });
+    return sendJson(res, 200, { user: await userFromRequest(req), signupMode: await signupMode() });
   }
   if (req.method !== 'POST') return sendText(res, 405, 'Method not allowed');
   if (action === 'logout') {
@@ -401,11 +401,16 @@ const server = useHttps
 
 // The schema must be current before we take requests (Postgres may still be starting).
 await dbReady();
+await seedInvites();
 server.listen(PORT, HOST, () => {
   const scheme = useHttps ? 'https' : 'http';
   console.log(`Hello Crew running at ${scheme}://localhost:${PORT}`);
   console.log(`Using Ollama model "${CHAT_MODEL}" (+ "${EMBED_MODEL}" for documents) at ${OLLAMA_URL}`);
-  console.log(inviteRequired() ? 'Sign-up needs an invite code (INVITE_CODE).' : 'Sign-up is open to anyone who can reach this server. Set INVITE_CODE before sharing a public link.');
+  signupMode().then((mode) =>
+    console.log(
+      { invite: 'Sign-up needs an invite code (manage codes in the admin panel).', open: 'Sign-up is OPEN to anyone who can reach this server (change it in the admin panel).', closed: 'Sign-up is closed (change it in the admin panel).' }[mode],
+    ),
+  );
 });
 
 // Start the Python helpers (KittenTTS voice, NCERT textbook search) alongside

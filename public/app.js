@@ -155,7 +155,7 @@ function switchListener(next, note) {
 let me = null; // { id, name, email }
 let homeLoaded = false;
 let authMode = 'signup';
-let inviteRequired = false;
+let signupMode = 'invite'; // 'invite' | 'open' | 'closed' (set in the admin panel)
 
 async function boot() {
   // Memory used to live in this browser; it's per account now, so clear the old copy.
@@ -164,7 +164,9 @@ async function boot() {
   } catch {}
   const status = await fetch('/api/auth/me').then((r) => r.json()).catch(() => ({}));
   me = status.user || null;
-  inviteRequired = !!status.inviteRequired;
+  signupMode = status.signupMode || 'invite';
+  if (signupMode === 'closed') authMode = 'login';
+  $('tab-signup').hidden = signupMode === 'closed';
   if (me) showHome();
   else showAuth();
 }
@@ -185,11 +187,13 @@ function setAuthMode(mode) {
   $('tab-signup').setAttribute('aria-selected', String(signup));
   $('tab-login').setAttribute('aria-selected', String(!signup));
   $('name-field').hidden = !signup;
-  $('invite-field').hidden = !(signup && inviteRequired);
+  $('invite-field').hidden = !(signup && signupMode === 'invite');
   $('auth-title').textContent = signup ? "Welcome! Let's get you set up" : 'Welcome back!';
   $('auth-sub').textContent = signup
     ? "Create an account so the crew can remember you: your name, how you like to talk, and what you're working on."
-    : 'Sign in and the crew will pick up right where you left off.';
+    : signupMode === 'closed'
+      ? 'Sign in and the crew will pick up right where you left off. (New sign-ups are closed right now.)'
+      : 'Sign in and the crew will pick up right where you left off.';
   $('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
   $('auth-password').autocomplete = signup ? 'new-password' : 'current-password';
   $('auth-error').hidden = true;
