@@ -1,5 +1,5 @@
 // Shared documents (RAG): PDFs are turned into text in the browser with pdf.js,
-// then embedded and stored by the server for this browser session.
+// then embedded and stored by the server for the signed-in user.
 const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
 let pdfjsPromise = null;
 
@@ -9,17 +9,6 @@ function pdfjs() {
     return lib;
   });
   return pdfjsPromise;
-}
-
-export function sessionId() {
-  let id = null;
-  try {
-    id = localStorage.getItem('session-id');
-    if (!id) localStorage.setItem('session-id', (id = crypto.randomUUID()));
-  } catch {
-    id = window.__sessionId ??= crypto.randomUUID();
-  }
-  return id;
 }
 
 async function extractPdfText(file, onProgress) {
@@ -39,7 +28,7 @@ async function post(body) {
   const res = await fetch('/api/docs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session: sessionId(), ...body }),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
@@ -66,10 +55,10 @@ export function addLink(url) {
 }
 
 export async function listDocs() {
-  const res = await fetch(`/api/docs?session=${encodeURIComponent(sessionId())}`);
+  const res = await fetch('/api/docs');
   return res.ok ? (await res.json()).docs : [];
 }
 
 export async function removeDoc(id) {
-  await fetch(`/api/docs?session=${encodeURIComponent(sessionId())}&id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await fetch(`/api/docs?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

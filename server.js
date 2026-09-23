@@ -1,6 +1,6 @@
-// Zero-dependency web server: serves the front end from ./public, runs the
-// persona chat pipeline (Ollama + web search + document RAG), and proxies
-// text-to-speech to the KittenTTS service.
+// Zero-dependency web server: serves the front end from ./public, handles
+// accounts and per-user memory (SQLite), runs the persona chat pipeline
+// (Ollama + web search + document RAG), and proxies the Python voice service.
 import http from 'node:http';
 import https from 'node:https';
 import { readFile } from 'node:fs/promises';
@@ -12,6 +12,8 @@ import { PERSONAS, publicPersona } from './lib/personas.js';
 import { respond, CHAT_MODEL } from './lib/chat.js';
 import { addDocument, listDocuments, removeDocument, EMBED_MODEL } from './lib/rag.js';
 import { fetchPage } from './lib/web.js';
+import { AuthError, signUp, logIn, renameUser, createSession, userFromRequest, endSession, inviteRequired } from './lib/auth.js';
+import { getHistory, addMessage, historyCounts, getMemory, forget, eraseAll, saveStudy, learnFromTurn, memoryNote, greetingFor } from './lib/memory.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -75,9 +77,8 @@ async function readJson(req, limit) {
   }
 }
 
-function validSession(id) {
-  return typeof id === 'string' && /^[\w-]{8,64}$/.test(id);
-}
+// Shared documents (RAG) are kept per user.
+const docsKey = (user) => `user-${user.id}`;
 
 async function serveStatic(req, res) {
   let pathname;
@@ -120,6 +121,16 @@ async function ncertHealth() {
   }
 }
 
+/** The indexed NCERT textbooks: { "10": { "science": [{ chapter, title }] } }, or {} if none. */
+async function handleBooks(res) {
+  try {
+    const r = await fetch(`${NCERT_URL}/catalog`, { signal: AbortSignal.timeout(5000) });
+    sendJson(res, 200, { ok: r.ok, catalog: r.ok ? await r.json() : {} });
+  } catch {
+    sendJson(res, 200, { ok: false, catalog: {} });
+  }
+}
+
 async function handleHealth(res) {
   const [tts, ncert] = await Promise.all([ttsHealth(), ncertHealth()]);
   let names = [];
@@ -146,16 +157,19 @@ async function handleHealth(res) {
 // ---------------------------------------------------------------------------
 // Chat: newline-delimited JSON events (see lib/chat.js)
 // ---------------------------------------------------------------------------
-async function handleChat(req, res) {
+async function handleChat(req, res, user) {
   const body = await readJson(req);
   if (!body) return sendText(res, 400, 'Invalid JSON body');
   const persona = PERSONAS.find((p) => p.id === body.persona);
   if (!persona) return sendText(res, 400, 'Unknown persona');
-  if (!validSession(body.session)) return sendText(res, 400, 'Missing session');
   const messages = (Array.isArray(body.messages) ? body.messages : []).filter(
     (m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string' && m.content.trim(),
   );
   if (messages.at(-1)?.role !== 'user') return sendText(res, 400, 'The last message must be from the user');
+
+  const question = messages.at(-1).content;
+  const memory = getMemory(user.id);
+  addMessage(user.id, persona.id, 'user', question);
 
   const controller = new AbortController();
   res.on('close', () => controller.abort());
@@ -164,9 +178,20 @@ async function handleChat(req, res) {
     'Cache-Control': 'no-cache',
     'X-Accel-Buffering': 'no',
   });
+  let reply = '';
   try {
-    for await (const event of respond({ persona, messages, sessionId: body.session, signal: controller.signal })) {
+    const events = respond({
+      persona,
+      messages,
+      sessionId: docsKey(user),
+      userNote: memoryNote(user, memory, persona),
+      study: persona.ncert ? memory.study : null,
+      signal: controller.signal,
+    });
+    for await (const event of events) {
       if (controller.signal.aborted) break;
+      if (event.type === 'text') reply += event.text;
+      if (event.type === 'study') saveStudy(user.id, event);
       res.write(JSON.stringify(event) + '\n');
     }
   } catch (err) {
@@ -176,31 +201,102 @@ async function handleChat(req, res) {
     }
   }
   res.end();
+  if (reply.trim()) {
+    addMessage(user.id, persona.id, 'assistant', controller.signal.aborted ? `${reply}…` : reply);
+    if (!controller.signal.aborted) learnFromTurn(user.id, question, reply);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Accounts and memory
+// ---------------------------------------------------------------------------
+const isSecure = (req) => !!useHttps || req.headers['x-forwarded-proto'] === 'https';
+
+/** The visitor's IP. Tunnels (cloudflared, Tailscale, ngrok) connect from this machine and
+ *  pass the real address in a header; only trust that header when the request is local. */
+function clientIp(req) {
+  const remote = req.socket.remoteAddress || '';
+  if (/^(::1|127\.|::ffff:127\.)/.test(remote)) {
+    const forwarded = req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return remote;
+}
+
+async function handleAuth(req, res, action) {
+  if (action === 'me' && req.method === 'GET') {
+    return sendJson(res, 200, { user: userFromRequest(req), inviteRequired: inviteRequired() });
+  }
+  if (req.method !== 'POST') return sendText(res, 405, 'Method not allowed');
+  if (action === 'logout') {
+    res.setHeader('Set-Cookie', endSession(req));
+    return sendJson(res, 200, { ok: true });
+  }
+  const body = (await readJson(req, 10_000)) || {};
+  try {
+    const user = action === 'signup' ? await signUp(body, clientIp(req)) : action === 'login' ? await logIn(body) : null;
+    if (!user) return sendText(res, 404, 'Not found');
+    res.setHeader('Set-Cookie', createSession(user.id, isSecure(req)));
+    return sendJson(res, 200, { user });
+  } catch (err) {
+    if (err instanceof AuthError) return sendJson(res, err.status, { error: err.message });
+    throw err;
+  }
+}
+
+/** A call is starting: the history with this character and a personal greeting. */
+function handleCallStart(res, user, url) {
+  const persona = PERSONAS.find((p) => p.id === url.searchParams.get('persona'));
+  if (!persona) return sendText(res, 400, 'Unknown persona');
+  const history = getHistory(user.id, persona.id);
+  const greeting = greetingFor(persona, user, getMemory(user.id), history.length > 0);
+  sendJson(res, 200, { history, greeting });
+}
+
+async function handleMemory(req, res, user, url) {
+  if (req.method === 'GET') {
+    return sendJson(res, 200, { user, memory: getMemory(user.id), history: historyCounts(user.id) });
+  }
+  if (req.method === 'DELETE') {
+    const fact = url.searchParams.get('fact');
+    const field = url.searchParams.get('field');
+    if (fact || field) forget(user.id, { fact, field });
+    else eraseAll(user.id);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === 'POST') {
+    const body = (await readJson(req, 10_000)) || {};
+    try {
+      return sendJson(res, 200, { user: { ...user, name: renameUser(user.id, body.name) } });
+    } catch (err) {
+      if (err instanceof AuthError) return sendJson(res, err.status, { error: err.message });
+      throw err;
+    }
+  }
+  sendText(res, 405, 'Method not allowed');
 }
 
 // ---------------------------------------------------------------------------
 // Documents (RAG): PDFs are parsed in the browser and arrive as text.
 // ---------------------------------------------------------------------------
-async function handleDocs(req, res, url) {
-  const session = url.searchParams.get('session');
+async function handleDocs(req, res, url, user) {
+  const session = docsKey(user);
   if (req.method === 'GET') {
-    if (!validSession(session)) return sendText(res, 400, 'Missing session');
     return sendJson(res, 200, { docs: listDocuments(session) });
   }
   if (req.method === 'DELETE') {
-    if (!validSession(session)) return sendText(res, 400, 'Missing session');
     return sendJson(res, 200, { removed: removeDocument(session, url.searchParams.get('id')) });
   }
   if (req.method === 'POST') {
     const body = await readJson(req, 8_000_000);
-    if (!body || !validSession(body.session)) return sendText(res, 400, 'Invalid request');
+    if (!body) return sendText(res, 400, 'Invalid request');
     try {
       let doc;
       if (body.url) {
         const page = await fetchPage(body.url);
-        doc = await addDocument(body.session, { title: page.title, text: page.text, source: page.url, type: 'link' });
+        doc = await addDocument(session, { title: page.title, text: page.text, source: page.url, type: 'link' });
       } else if (typeof body.text === 'string' && body.text.trim()) {
-        doc = await addDocument(body.session, {
+        doc = await addDocument(session, {
           title: String(body.title || 'Document').slice(0, 200),
           text: body.text.slice(0, MAX_DOC_CHARS),
           type: body.type === 'pdf' ? 'pdf' : 'text',
@@ -258,12 +354,25 @@ async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const { pathname } = url;
   try {
-    if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
+    // Public: sign in/up, and what the landing page needs to render.
+    const auth = pathname.match(/^\/api\/auth\/(signup|login|logout|me)$/);
+    if (auth) return await handleAuth(req, res, auth[1]);
     if (pathname === '/api/personas' && req.method === 'GET') return sendJson(res, 200, { personas: PERSONAS.map(publicPersona) });
-    if (pathname === '/api/docs') return await handleDocs(req, res, url);
-    if (pathname === '/api/tts' && req.method === 'POST') return await handleTts(req, res);
-    if (pathname === '/api/stt' && req.method === 'POST') return await handleStt(req, res);
     if (pathname === '/api/health' && req.method === 'GET') return await handleHealth(res);
+    if (pathname === '/api/books' && req.method === 'GET') return await handleBooks(res);
+
+    // Everything else under /api needs a signed-in user.
+    if (pathname.startsWith('/api/')) {
+      const user = userFromRequest(req);
+      if (!user) return sendJson(res, 401, { error: 'Please sign in.' });
+      if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res, user);
+      if (pathname === '/api/call' && req.method === 'GET') return handleCallStart(res, user, url);
+      if (pathname === '/api/memory') return await handleMemory(req, res, user, url);
+      if (pathname === '/api/docs') return await handleDocs(req, res, url, user);
+      if (pathname === '/api/tts' && req.method === 'POST') return await handleTts(req, res);
+      if (pathname === '/api/stt' && req.method === 'POST') return await handleStt(req, res);
+      return sendText(res, 404, 'Not found');
+    }
     if (req.method === 'GET' || req.method === 'HEAD') return await serveStatic(req, res);
     sendText(res, 405, 'Method not allowed');
   } catch (err) {
@@ -284,6 +393,7 @@ server.listen(PORT, HOST, () => {
   const scheme = useHttps ? 'https' : 'http';
   console.log(`AI call app running at ${scheme}://localhost:${PORT}`);
   console.log(`Using Ollama model "${CHAT_MODEL}" (+ "${EMBED_MODEL}" for documents) at ${OLLAMA_URL}`);
+  console.log(inviteRequired() ? 'Sign-up needs an invite code (INVITE_CODE).' : 'Sign-up is open to anyone who can reach this server. Set INVITE_CODE before sharing a public link.');
 });
 
 // Start the Python helpers (KittenTTS voice, NCERT textbook search) alongside

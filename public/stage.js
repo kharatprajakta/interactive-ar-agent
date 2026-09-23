@@ -1,13 +1,14 @@
 // The call "set": renders a persona in their room, directs their behaviour
-// (walk to the stove while thinking, come back to talk, potter about when it's
-// quiet), frames the camera like a video call, and supports WebXR AR.
+// (step up to the camera to talk, nod while listening, gesture while speaking,
+// go to their workstation only for real research, potter about after a long
+// silence), frames the camera like a video call, and supports WebXR AR.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { Avatar, loadCharacter, CHARACTER_HEIGHT } from './avatar.js';
 import { SCENES } from './scenes.js';
 
-const AR_SCALE = 1.4;
+const AR_SCALE = 0.7; // ~0.5 m tall in your room: a desk-top buddy rather than a child-sized figure
 const propLoader = new GLTFLoader();
 const propCache = new Map();
 
@@ -21,6 +22,24 @@ function loadProp(m) {
 }
 
 const rand = (a, b) => a + Math.random() * (b - a);
+
+// Conversation staging: the character steps this far toward the camera from
+// their room's home spot to talk, and the camera eases in to match.
+const STEP_IN = 0.22; // metres
+const CLOSE_ZOOM = 0.86; // camera distance while talking, relative to the wide shot
+// With nobody talking for this long, they potter about their room; any speech brings them back.
+const IDLE_WANDER_AFTER = 45; // seconds
+const IDLE_WANDER_AGAIN = [60, 100];
+const GESTURE_COOLDOWN = 4; // seconds between speaking gestures
+
+/** Pick a body gesture that fits a spoken sentence, or null for none. */
+function gestureFor(sentence) {
+  const s = sentence.trim().toLowerCase();
+  if (/^(yes|yeah|yep|sure|absolutely|exactly|right|great|perfect|of course|correct|good (job|question)|well done)\b/.test(s)) return 'emote-yes';
+  if (/^(no|nope|not really|unfortunately|sadly|i'm afraid|i don't|that's not)\b/.test(s)) return 'emote-no';
+  if (s.length > 50 && /\b(first|so|here's|let's|imagine|think of|for example|the key|the trick)\b/.test(s)) return Math.random() < 0.5 ? 'interact-right' : 'interact-left';
+  return null;
+}
 
 export class Stage {
   constructor(container) {
@@ -99,7 +118,11 @@ export class Stage {
     this.avatar.group.rotation.y = 0;
     this.avatar.face(null);
     this.avatar.perform('idle');
+    this.spot = 'back'; // at home in the room; greet() steps them up to the camera
+    this.zoom = 1;
     this.setMode('idle');
+    this.idleTimer = IDLE_WANDER_AFTER;
+    this.idleAction = null;
     this.resize();
   }
 
@@ -206,13 +229,20 @@ export class Stage {
     this.avatar.setState(mode);
     if (!this.def || this.inAR) return;
     if (mode === 'speaking' || mode === 'listening') this._goHome();
-    if (mode === 'thinking' && prev !== 'thinking') this.thinkTime = 0;
-    if (mode === 'idle') this.idleTimer = rand(9, 16);
+    // Stay put and face the user during a conversation; only wander off after
+    // a long stretch with nobody talking. Any activity restarts the wait.
+    if (mode === 'idle' && prev !== 'idle') this.idleTimer = IDLE_WANDER_AFTER;
   }
 
-  /** Research activity from the server: go "work" at the persona's station. */
+  /** Research activity from the server (web search, reading a document or textbook):
+   *  go "work" at the persona's station. Ordinary replies are given in place. */
   activity() {
     if (this.mode === 'thinking') this._goWork();
+  }
+
+  /** Where they stand to talk: a step in front of their home spot, facing the camera. */
+  _talkSpot() {
+    return [this.def.home[0], this.def.home[1] + STEP_IN];
   }
 
   _goHome() {
@@ -220,7 +250,41 @@ export class Stage {
     this.spot = 'home';
     this.idleAction = null;
     this.avatar.face(null);
-    this.avatar.walkTo(this.def.home[0], this.def.home[1], () => this.avatar.perform('idle'));
+    const [x, z] = this._talkSpot();
+    this.avatar.walkTo(x, z, () => this.avatar.perform('idle'));
+  }
+
+  /** Call connected: step up to the camera and nod hello. */
+  greet() {
+    if (!this.def || this.inAR) return this.avatar.wave();
+    this.spot = null;
+    this._goHome();
+    if (!this.avatar.walking) return this.avatar.wave();
+    this.avatar.onArrive = () => {
+      this.avatar.perform('idle');
+      this.avatar.wave();
+    };
+  }
+
+  /** The character starts a spoken sentence: sometimes a gesture that fits it. */
+  speechGesture(sentence) {
+    const now = performance.now() / 1000;
+    if (now - (this.lastGesture || 0) < GESTURE_COOLDOWN) return;
+    const g = gestureFor(sentence);
+    if (g && this.avatar.gesture(g)) this.lastGesture = now;
+  }
+
+  /** The user is talking: an occasional small nod, like an attentive listener. */
+  listenCue() {
+    const now = performance.now() / 1000;
+    if (now < (this.nextListenNod || 0)) return;
+    this.nextListenNod = now + rand(2.5, 4.5);
+    this.avatar.nod(0.6);
+  }
+
+  /** The user finished a sentence: a quick "got it" nod. */
+  acknowledge() {
+    this.avatar.nod(1);
   }
 
   _goTo(spot, name, onArrive) {
@@ -239,15 +303,12 @@ export class Stage {
 
   _direct(dt) {
     if (!this.def || this.inAR) return;
-    if (this.mode === 'thinking') {
-      this.thinkTime += dt;
-      if (this.thinkTime > 1.6) this._goWork(); // taking a while: go "work on it"
-    } else if (this.mode === 'idle') {
+    if (this.mode === 'idle') {
       if (this.idleAction) {
         this.idleAction -= dt;
         if (this.idleAction <= 0) {
           this._goHome();
-          this.idleTimer = rand(12, 22);
+          this.idleTimer = rand(IDLE_WANDER_AGAIN[0], IDLE_WANDER_AGAIN[1]);
         }
       } else if (!this.avatar.walking) {
         this.idleTimer -= dt;
@@ -287,11 +348,15 @@ export class Stage {
     this.camLook.x += (pos.x * 0.75 - this.camLook.x) * k;
     this.camLook.y = CHARACTER_HEIGHT * 0.5;
     this.camLook.z += (pos.z * 0.5 - this.camLook.z) * k;
+    // Ease in closer while they're at their talking spot; wide shot while they potter about.
+    const zoomTarget = this.spot === 'home' ? CLOSE_ZOOM : 1;
+    this.zoom = (this.zoom ?? 1) + (zoomTarget - (this.zoom ?? 1)) * (1 - Math.exp(-dt * 0.8));
+    const dist = this.camDist * this.zoom;
     const sway = (f, a) => Math.sin(t * f) * a;
     this.camera.position.set(
       this.camLook.x + sway(0.5, 0.012),
-      this.camLook.y + this.camDist * 0.2 + sway(0.7, 0.008),
-      this.camLook.z + this.camDist,
+      this.camLook.y + dist * 0.2 + sway(0.7, 0.008),
+      this.camLook.z + dist,
     );
     // Aim a little low so the character sits in the upper part of the frame, clear of the call controls.
     this.camera.lookAt(this.camLook.x, this.camLook.y - 0.12 + sway(0.4, 0.004), this.camLook.z);
@@ -381,7 +446,10 @@ export class Stage {
       this.scene.fog = this.savedFog;
       this.avatar.group.visible = true;
       this.avatar.group.scale.setScalar(1);
-      if (this.def) this.avatar.group.position.set(this.def.home[0], 0, this.def.home[1]);
+      if (this.def) {
+        const [x, z] = this._talkSpot();
+        this.avatar.group.position.set(x, 0, z);
+      }
       this.spot = 'home';
       this.resize();
       onHint?.(null);

@@ -1,6 +1,6 @@
 import { Stage, renderPortraits } from './stage.js';
 import { Voice, Listener, LocalListener } from './voice.js';
-import { sessionId, uploadFile, addLink, listDocs, removeDoc } from './docs.js';
+import { uploadFile, addLink, listDocs, removeDoc } from './docs.js';
 
 const $ = (id) => document.getElementById(id);
 const PHONE_ICON =
@@ -8,6 +8,7 @@ const PHONE_ICON =
 
 let personas = [];
 let health = null;
+let books = {}; // indexed NCERT textbooks: { "10": { "science": [{ chapter, title }] } }
 let portraits = {};
 let stage = null;
 let call = null; // the active call's state
@@ -27,6 +28,12 @@ const voice = new Voice({
       setState('speaking');
     } else {
       call.lastSpokeAt = performance.now();
+      if (call.pendingAsk) {
+        const q = call.pendingAsk;
+        call.pendingAsk = null;
+        ask(q);
+        return;
+      }
       resumeListening(ECHO_TAIL_MS);
       if (call.state === 'speaking') setState(call.streaming ? 'thinking' : 'idle');
       clearTimeout(call.capTimer);
@@ -37,6 +44,7 @@ const voice = new Voice({
   onSentence(text) {
     if (!call) return;
     setCaption('agent', text);
+    stage.speechGesture(text);
     call.spoken.push({ text, at: performance.now() });
     if (call.spoken.length > 12) call.spoken.shift();
   },
@@ -88,6 +96,7 @@ const hearing = {
     setCaption('user', text);
     $('btn-mic').classList.add('hearing');
     if (call.state === 'idle') setState('listening');
+    stage.listenCue();
     armListeningWatchdog();
   },
   onUtterance(text) {
@@ -141,21 +150,218 @@ function switchListener(next, note) {
 }
 
 // ===========================================================================
-// Landing page
+// Accounts: sign up / sign in, then the landing page
 // ===========================================================================
+let me = null; // { id, name, email }
+let homeLoaded = false;
+let authMode = 'signup';
+let inviteRequired = false;
+
+async function boot() {
+  // Memory used to live in this browser; it's per account now, so clear the old copy.
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith('history:') || key === 'session-id') localStorage.removeItem(key);
+  } catch {}
+  const status = await fetch('/api/auth/me').then((r) => r.json()).catch(() => ({}));
+  me = status.user || null;
+  inviteRequired = !!status.inviteRequired;
+  if (me) showHome();
+  else showAuth();
+}
+
+function showAuth(message = '') {
+  me = null;
+  $('home').hidden = true;
+  $('call').hidden = true;
+  $('auth').hidden = false;
+  setAuthMode(message ? 'login' : authMode);
+  $('auth-error').hidden = !message;
+  $('auth-error').textContent = message;
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const signup = mode === 'signup';
+  $('tab-signup').setAttribute('aria-selected', String(signup));
+  $('tab-login').setAttribute('aria-selected', String(!signup));
+  $('name-field').hidden = !signup;
+  $('invite-field').hidden = !(signup && inviteRequired);
+  $('auth-title').textContent = signup ? "Welcome! Let's get you set up" : 'Welcome back!';
+  $('auth-sub').textContent = signup
+    ? "Create an account so the crew can remember you: your name, how you like to talk, and what you're working on."
+    : 'Sign in and the crew will pick up right where you left off.';
+  $('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
+  $('auth-password').autocomplete = signup ? 'new-password' : 'current-password';
+  $('auth-error').hidden = true;
+}
+
+async function submitAuth(e) {
+  e.preventDefault();
+  const body = {
+    name: $('auth-name').value,
+    email: $('auth-email').value,
+    password: $('auth-password').value,
+    invite: $('auth-invite').value,
+  };
+  $('auth-submit').disabled = true;
+  try {
+    const res = await fetch(`/api/auth/${authMode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Something went wrong (${res.status})`);
+    me = data.user;
+    $('auth-password').value = '';
+    showHome();
+  } catch (err) {
+    $('auth-error').textContent = err.message;
+    $('auth-error').hidden = false;
+  } finally {
+    $('auth-submit').disabled = false;
+  }
+}
+
+async function logOut() {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  showAuth();
+}
+
+function greetUser() {
+  const hour = new Date().getHours();
+  const partOfDay = hour < 5 ? 'Hi' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  $('hello').textContent = `${partOfDay}, ${me.name.split(' ')[0]}! Who would you like to talk to?`;
+}
+
+async function showHome() {
+  $('auth').hidden = true;
+  $('home').hidden = false;
+  greetUser();
+  if (!homeLoaded) {
+    homeLoaded = true;
+    await init();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "What the crew remembers" panel
+// ---------------------------------------------------------------------------
+async function openMemory() {
+  $('memory').showModal();
+  await renderMemory();
+}
+
+async function renderMemory() {
+  const body = $('memory-body');
+  const res = await fetch('/api/memory');
+  if (res.status === 401) return ($('memory').close(), showAuth('Please sign in again.'));
+  const { memory, history } = await res.json();
+  body.replaceChildren();
+
+  const section = (title) => {
+    const h = document.createElement('h3');
+    h.textContent = title;
+    body.append(h);
+  };
+  const row = (text, onForget, extra = '') => {
+    const div = document.createElement('div');
+    div.className = 'mem-row';
+    div.innerHTML = '<span></span>';
+    div.firstChild.textContent = text;
+    if (extra) div.firstChild.title = extra;
+    if (onForget) {
+      const btn = document.createElement('button');
+      btn.className = 'mem-forget';
+      btn.textContent = 'Forget';
+      btn.addEventListener('click', async () => {
+        await onForget();
+        renderMemory();
+      });
+      div.append(btn);
+    }
+    body.append(div);
+  };
+  const forget = (params) => () => fetch(`/api/memory?${new URLSearchParams(params)}`, { method: 'DELETE' });
+
+  // Name (editable)
+  section('Your name');
+  const nameForm = document.createElement('form');
+  nameForm.className = 'mem-name';
+  nameForm.innerHTML = '<input maxlength="40" aria-label="Your name" /><button type="submit">Save</button>';
+  nameForm.firstChild.value = me.name;
+  nameForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const r = await fetch('/api/memory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nameForm.firstChild.value }) });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) {
+      me = data.user;
+      greetUser();
+      nameForm.lastChild.textContent = 'Saved ✓';
+      setTimeout(() => (nameForm.lastChild.textContent = 'Save'), 1500);
+    }
+  });
+  body.append(nameForm);
+
+  section('How you like to talk');
+  if (!memory.language && !memory.style) row("Nothing yet. Just chat and they'll pick it up.");
+  if (memory.language) row(`🗣️ ${memory.language}`, forget({ field: 'language' }));
+  if (memory.style) row(`✨ ${memory.style}`, forget({ field: 'style' }));
+
+  section('Things they know about you');
+  if (!memory.facts.length) row('Nothing yet. Tell them about yourself and they’ll remember.');
+  for (const f of memory.facts) row(`• ${f}`, forget({ fact: f }));
+
+  if (memory.study) {
+    const s = memory.study;
+    section('Study progress with Kiki');
+    row(`📖 Class ${s.class_num} ${bookLabel(s.subject)}${s.chapter ? `, Chapter ${s.chapter}: ${s.chapter_title}` : ''}`, forget({ field: 'study' }));
+  }
+
+  section('Conversations');
+  const total = Object.values(history).reduce((a, b) => a + b, 0);
+  if (!total) row('No saved conversations yet.');
+  else {
+    const who = Object.entries(history)
+      .map(([id, n]) => `${personas.find((p) => p.id === id)?.name || id} (${n})`)
+      .join(', ');
+    row(`💬 ${total} messages saved: ${who}`, forget({ field: 'history' }));
+  }
+}
+
+async function eraseMemory() {
+  if (!confirm('Erase everything the crew remembers about you? Your account stays, but all conversations, facts and study progress are deleted.')) return;
+  await fetch('/api/memory', { method: 'DELETE' });
+  renderMemory();
+}
+
+$('tab-signup').addEventListener('click', () => setAuthMode('signup'));
+$('tab-login').addEventListener('click', () => setAuthMode('login'));
+$('auth-form').addEventListener('submit', submitAuth);
+$('btn-logout').addEventListener('click', logOut);
+$('btn-memory').addEventListener('click', openMemory);
+$('btn-erase').addEventListener('click', eraseMemory);
+
 async function init() {
-  const [p, h] = await Promise.all([
+  const [p, h, b] = await Promise.all([
     fetch('/api/personas').then((r) => r.json()),
     fetch('/api/health').then((r) => r.json()).catch(() => null),
+    fetch('/api/books').then((r) => r.json()).catch(() => null),
   ]);
   personas = p.personas;
   health = h;
+  books = sortBooks(b?.catalog || {});
   renderContacts();
   showNotices();
   portraits = await renderPortraits(personas);
   for (const persona of personas) {
-    const art = document.querySelector(`[data-id="${persona.id}"] .card-art`);
-    if (art && portraits[persona.id]) art.innerHTML = `<img src="${portraits[persona.id]}" alt="" />`;
+    const skeleton = document.querySelector(`[data-id="${persona.id}"] .card-art .skeleton`);
+    if (skeleton && portraits[persona.id]) {
+      const img = new Image();
+      img.src = portraits[persona.id];
+      img.alt = '';
+      skeleton.replaceWith(img);
+    }
   }
 }
 
@@ -168,16 +374,28 @@ function renderContacts() {
       li.dataset.id = p.id;
       li.style.setProperty('--accent', p.color);
       li.innerHTML = `
-        <div class="card-art"><div class="skeleton"></div></div>
+        <div class="card-art"><div class="skeleton"></div><span class="online">Available</span></div>
         <div class="card-body">
           <div class="card-name"></div>
           <div class="card-role"></div>
           <p class="card-tag"></p>
+          <div class="starters"><span class="starters-label">Try asking</span></div>
           <button class="call-btn">${PHONE_ICON}<span></span></button>
         </div>`;
       li.querySelector('.card-name').textContent = p.name;
       li.querySelector('.card-role').textContent = p.role;
       li.querySelector('.card-tag').textContent = p.tagline;
+      if (p.ncert) li.querySelector('.card-tag').after(libraryLine());
+      const starters = li.querySelector('.starters');
+      for (const q of p.starters || []) {
+        const chip = document.createElement('button');
+        chip.className = 'starter';
+        chip.textContent = `“${q}”`;
+        chip.title = `Call ${p.name} and ask this`;
+        chip.addEventListener('click', () => startCall(p, q));
+        starters.append(chip);
+      }
+      starters.hidden = !p.starters?.length;
       li.querySelector('.call-btn span').textContent = `Call ${p.name}`;
       li.querySelector('.call-btn').addEventListener('click', () => startCall(p));
       return li;
@@ -191,43 +409,125 @@ function showNotices() {
   else {
     if (health.error) notes.push(health.error);
     if (health.warning) notes.push(health.warning);
-    if (!health.tts?.ok) notes.push("The Python voice service isn't running, so calls use your browser's built-in voice.");
-    if (health.ncert?.ok && !health.ncert.chunks) notes.push('No NCERT textbooks are loaded yet, so Kiki can\'t teach from them. See the README ("NCERT textbooks").');
+    if (!health.tts?.ok) notes.push("Heads up: the voice service is still starting (or isn't running), so for now everyone will use your browser's built-in voice.");
+    if (health.ncert?.ok && !health.ncert.chunks) notes.push('Kiki\'s bookshelf is empty for now, so she\'ll explain from general knowledge. See "NCERT textbooks" in the README to add books.');
   }
-  if (!canListen()) notes.push("This browser can't do hands-free voice. Use Chrome or Edge, or start the Python voice service for on-device recognition. You can always type in the call's chat.");
-  else if (!localAvailable()) notes.push("Hands-free voice is using your browser's online speech service. Start the Python voice service for private, on-device recognition.");
+  if (!canListen()) notes.push("This browser can't listen hands-free. Chrome or Edge works best, but you can always type in the call's chat.");
+  else if (!localAvailable()) notes.push("Hands-free voice is using your browser's online speech service for now. Start the Python voice service to keep it all on your machine.");
   $('notice').hidden = !notes.length;
   $('notice').innerHTML = notes.map((n) => `<div>${n.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c])}</div>`).join('');
 }
 
 // ===========================================================================
-// Call lifecycle
+// NCERT bookshelf (Kiki)
 // ===========================================================================
-function historyKey(p) {
-  return `history:${p.id}`;
+const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\b(And|Of|The|Without)\b/g, (w) => w.toLowerCase());
+
+/** "english first flight" -> "English: First Flight", "political science" -> "Political Science" */
+function bookLabel(subject) {
+  const m = subject.match(/^(english|hindi|sanskrit) (.+)$/);
+  return m ? `${titleCase(m[1])}: ${titleCase(m[2])}` : titleCase(subject);
 }
 
-function loadHistory(p) {
-  try {
-    return JSON.parse(localStorage.getItem(historyKey(p))) || [];
-  } catch {
-    return [];
+const SUBJECT_ORDER = ['science', 'maths', 'physics', 'chemistry', 'biology', 'history', 'geography', 'political science', 'economics', 'english'];
+
+/** Classes in number order; subjects core-first (science, maths, social science, english), then A-Z. */
+function sortBooks(catalog) {
+  const rank = (s) => {
+    const i = SUBJECT_ORDER.findIndex((o) => s === o || s.startsWith(`${o} `));
+    return i < 0 ? SUBJECT_ORDER.length : i;
+  };
+  return Object.fromEntries(
+    Object.entries(catalog)
+      .sort(([a], [b]) => a - b)
+      .map(([cls, subjects]) => [cls, Object.fromEntries(Object.entries(subjects).sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)))]),
+  );
+}
+
+/** "📚 Class 10 · Science, Maths, History +7" under Kiki's card. */
+function libraryLine() {
+  const el = document.createElement('p');
+  el.className = 'card-books';
+  const classes = Object.entries(books);
+  if (!classes.length) {
+    el.textContent = '📚 No textbooks loaded yet';
+    return el;
+  }
+  el.textContent = classes
+    .map(([cls, subjects]) => {
+      const names = Object.keys(subjects).map(bookLabel);
+      return `Class ${cls} · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3} more` : ''}`;
+    })
+    .join('  |  ');
+  el.prepend('📚 ');
+  el.title = classes.map(([cls, s]) => `Class ${cls}: ${Object.keys(s).map(bookLabel).join(', ')}`).join('\n');
+  return el;
+}
+
+function renderShelf() {
+  const list = $('shelf-list');
+  list.replaceChildren();
+  for (const [cls, subjects] of Object.entries(books)) {
+    const head = document.createElement('h3');
+    head.textContent = `Class ${cls}`;
+    list.append(head);
+    for (const [subject, chapters] of Object.entries(subjects)) {
+      const book = document.createElement('details');
+      book.className = 'book';
+      book.innerHTML = `<summary><span class="book-name"></span><span class="book-count"></span></summary><button class="book-open"></button><ol class="chapters"></ol>`;
+      const name = bookLabel(subject);
+      book.querySelector('.book-name').textContent = name;
+      book.querySelector('.book-count').textContent = `${chapters.length} ch`;
+      const open = book.querySelector('.book-open');
+      open.textContent = `Study ${name}`;
+      open.addEventListener('click', () => pickBook(`I'm in Class ${cls}. Let's study ${name}.`));
+      const ol = book.querySelector('.chapters');
+      for (const c of chapters) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.innerHTML = '<b></b><span></span>';
+        btn.firstChild.textContent = c.chapter;
+        btn.lastChild.textContent = c.title;
+        btn.addEventListener('click', () => pickBook(`I'm in Class ${cls}. Let's study ${name}, Chapter ${c.chapter}: ${c.title}.`));
+        li.append(btn);
+        ol.append(li);
+      }
+      list.append(book);
+    }
   }
 }
 
-function saveHistory() {
-  try {
-    localStorage.setItem(historyKey(call.persona), JSON.stringify(call.history.slice(-30)));
-  } catch {}
+/** Say the choice to Kiki as if the student had spoken it; she confirms, then opens the book. */
+function pickBook(text) {
+  openShelf(false);
+  ask(text);
 }
 
-async function startCall(p) {
+function openShelf(open) {
+  if (open) openDrawer(false);
+  $('shelf').hidden = !open;
+  $('btn-books').setAttribute('aria-pressed', String(open));
+}
+
+// ===========================================================================
+// Call lifecycle
+// ===========================================================================
+/** Your history with this character and their personal greeting (the server keeps both per user). */
+async function fetchCallStart(p) {
+  const res = await fetch(`/api/call?persona=${encodeURIComponent(p.id)}`);
+  if (res.status === 401) throw Object.assign(new Error('Please sign in again.'), { signedOut: true });
+  if (!res.ok) throw new Error(`Couldn't load your conversation (${res.status})`);
+  return res.json();
+}
+
+/** Start a call; `starter` is a question to ask once they've said hello. */
+async function startCall(p, starter = null) {
   if (call) return;
   voice.unlock(); // inside the click, so audio is allowed later
 
   call = {
     persona: p,
-    history: loadHistory(p),
+    history: [],
     state: 'idle',
     micOn: canListen(),
     spoken: [],
@@ -235,6 +535,7 @@ async function startCall(p) {
     requestId: 0,
     abort: null,
     cancelled: false,
+    pendingAsk: starter,
   };
 
   const root = $('call');
@@ -251,6 +552,9 @@ async function startCall(p) {
   $('hint').hidden = true;
   $('drawer').hidden = true;
   $('btn-chat').setAttribute('aria-pressed', 'false');
+  openShelf(false);
+  $('btn-books').hidden = !(p.ncert && Object.keys(books).length);
+  if (p.ncert) renderShelf();
   setStatus('Connecting…', 'idle');
 
   const ringing = $('ringing');
@@ -265,20 +569,25 @@ async function startCall(p) {
   stage.start();
   Stage.arSupported().then((ok) => ($('btn-ar').hidden = !ok));
 
+  let start;
   try {
     // Re-check services too: speech recognition may have finished loading since the page opened.
-    const [, , fresh] = await Promise.all([
+    const [, , fresh, s] = await Promise.all([
       stage.load(p),
       new Promise((r) => setTimeout(r, 1400)),
       fetch('/api/health').then((r) => r.json()).catch(() => null),
+      fetchCallStart(p),
     ]);
     if (fresh) health = fresh;
+    start = s;
   } catch (err) {
     console.error(err);
+    if (err.signedOut) return (endCall(), showAuth());
     $('ring-text').textContent = `Couldn't connect: ${err.message}`;
     return;
   }
   if (!call || call.cancelled || call.persona !== p) return;
+  call.history = start.history;
 
   // Connected.
   ringing.classList.add('gone');
@@ -291,12 +600,24 @@ async function startCall(p) {
   voice.setPersonaVoice(p, !!health?.tts?.ok);
   refreshDocs();
 
-  stage.avatar.wave();
-  const greeting = call.history.length ? `Hey, you're back! ${p.greeting.replace(/^[^!.?]*[!.?]\s*/, '')}` : p.greeting;
+  stage.greet();
+  // Show the end of your last conversation, so it's clear they remember.
+  const earlier = call.history.slice(-6);
+  if (earlier.length) {
+    addMsg('system', 'Earlier with you');
+    for (const m of earlier) addMsg(m.role === 'user' ? 'user' : 'agent', m.content).classList.add('earlier');
+  }
+  const greeting = start.greeting || p.greeting;
   addMsg('agent', greeting);
   call.history.push({ role: 'assistant', content: greeting });
   voice.speak(greeting);
   if (!voice.speaking) setState('idle');
+  // A "Try asking" chip: ask it once the greeting is done (right away if nothing is being said).
+  if (call.pendingAsk && !voice.speaking) {
+    const q = call.pendingAsk;
+    call.pendingAsk = null;
+    setTimeout(() => call && ask(q), 600);
+  }
 
   listener = localAvailable() ? localListener : webListener;
   setMic(call.micOn);
@@ -316,7 +637,6 @@ function endCall() {
   clearTimeout(call.capTimer);
   clearTimeout(call.resumeTimer);
   clearTimeout(call.listenTimer);
-  if (call.history.length) saveHistory();
   setCamera(false);
   stage?.exitAR();
   stage?.stop();
@@ -410,6 +730,7 @@ async function ask(text) {
 
   addMsg('user', text);
   setCaption('user', text);
+  stage.acknowledge();
   setCaption('agent', '');
   c.history.push({ role: 'user', content: text });
   c.statusText = null;
@@ -425,9 +746,13 @@ async function ask(text) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: c.persona.id, session: sessionId(), messages: c.history.slice(-20) }),
+      body: JSON.stringify({ persona: c.persona.id, messages: c.history.slice(-20) }),
       signal: abort.signal,
     });
+    if (res.status === 401) {
+      endCall();
+      return showAuth('Your session ended. Please sign in again.');
+    }
     if (!res.ok) throw new Error((await res.text()) || `Request failed (${res.status})`);
 
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -461,7 +786,7 @@ async function ask(text) {
           addMsg('system', `Added “${ev.doc.title}” to shared documents.`);
         } else if (ev.type === 'study') {
           const chip = $('study-chip');
-          chip.textContent = `Class ${ev.class_num} · ${ev.subject}${ev.chapter ? ` · Ch ${ev.chapter}: ${ev.chapter_title}` : ''}`;
+          chip.textContent = `📖 Class ${ev.class_num} · ${bookLabel(ev.subject)}${ev.chapter ? ` · Ch ${ev.chapter}: ${ev.chapter_title}` : ''}`;
           chip.hidden = false;
         } else if (ev.type === 'error') {
           throw new Error(ev.text);
@@ -472,7 +797,6 @@ async function ask(text) {
     if (!full.trim()) throw new Error('No reply came back.');
     if (sources?.length) showSources(bubble, sources);
     c.history.push({ role: 'assistant', content: full });
-    saveHistory();
   } catch (err) {
     if (err.name === 'AbortError') {
       if (full) c.history.push({ role: 'assistant', content: full + '…' });
@@ -526,6 +850,7 @@ async function setCamera(on) {
 }
 
 function openDrawer(open) {
+  if (open) openShelf(false);
   $('drawer').hidden = !open;
   $('btn-chat').setAttribute('aria-pressed', String(open));
   if (open) {
@@ -577,6 +902,9 @@ for (const id of ['stage', 'call-status']) {
 $('btn-cam').addEventListener('click', () => setCamera($('selfview').hidden));
 $('btn-chat').addEventListener('click', () => openDrawer($('drawer').hidden));
 $('btn-drawer-close').addEventListener('click', () => openDrawer(false));
+$('btn-books').addEventListener('click', () => openShelf($('shelf').hidden));
+$('btn-shelf-close').addEventListener('click', () => openShelf(false));
+$('study-chip').addEventListener('click', () => openShelf(true));
 $('btn-end').addEventListener('click', endCall);
 $('btn-cancel').addEventListener('click', endCall);
 $('btn-attach').addEventListener('click', () => $('file-input').click());
@@ -631,6 +959,7 @@ for (const el of document.querySelectorAll('.call-ui > *')) {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('drawer').hidden) openDrawer(false);
+  if (e.key === 'Escape' && !$('shelf').hidden) openShelf(false);
 });
 
-init();
+boot();

@@ -42,6 +42,9 @@ export class Avatar {
     this.pulse = 0;
     this.headPitch = 0;
     this.headRoll = 0;
+    this.lean = 0; // forward body lean, radians
+    this.nodTime = Infinity;
+    this.nodAmp = 0;
     this.character = null;
     this.model = null;
     this.mixer = null;
@@ -136,6 +139,19 @@ export class Avatar {
   /** A friendly nod, e.g. when a call connects. */
   wave() {
     if (!this.walkTarget) this._play('emote-yes', { once: true });
+  }
+
+  /** A small head nod layered on top of any clip (listening, acknowledging). */
+  nod(strength = 1) {
+    this.nodTime = 0;
+    this.nodAmp = 0.16 * strength;
+  }
+
+  /** A body gesture clip (emote-yes, emote-no, interact-right…), only while standing still. */
+  gesture(name) {
+    if (this.walkTarget || !this.actions[name] || this.current !== this.actions[this.base]) return false;
+    this._play(name, { once: true });
+    return true;
   }
 
   /** Play a clip: looping until changed, or `repeat` times then back to idle. */
@@ -250,7 +266,16 @@ export class Avatar {
     if (!Number.isFinite(this.headRoll)) this.headRoll = 0;
     if (!Number.isFinite(this.talk)) this.talk = 0;
 
-    _euler.set(this.headPitch - this.talk * 0.12, 0, this.headRoll);
+    // Lean in a little toward the viewer while listening (attentive) or talking.
+    const leanTarget = lookingAtViewer ? { listening: 0.07, speaking: 0.035 }[this.state] || 0 : 0;
+    this.lean += (leanTarget - this.lean) * (1 - Math.exp(-dt * 3));
+    if (Number.isFinite(this.lean)) this.model.rotation.x = this.lean;
+
+    // A nod: one smooth dip and back up over ~0.45 s.
+    this.nodTime += dt;
+    const nod = this.nodTime < 0.45 ? Math.sin((Math.PI * this.nodTime) / 0.45) * this.nodAmp : 0;
+
+    _euler.set(this.headPitch + nod - this.talk * 0.12, 0, this.headRoll);
     this.head.quaternion.multiply(_quat.setFromEuler(_euler));
     // A small squash-and-stretch reads as "talking" on these mouthless faces.
     this.head.scale.y *= 1 + this.talk * 0.06;
