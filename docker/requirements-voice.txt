@@ -1,0 +1,5 @@
+# Voice service image (tts_server.py): Kokoro voices + Whisper speech recognition.
+# KittenTTS is left out of the image (its spaCy dependency is heavy); it's only a local fallback.
+kokoro-onnx>=0.4,<1
+faster-whisper>=1.1,<2
+numpy>=1.26,<3

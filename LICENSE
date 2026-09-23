@@ -1,0 +1,51 @@
+PROPRIETARY SOFTWARE LICENSE
+
+Copyright (c) 2026 PacificAI. All rights reserved.
+
+This software, including its source code, object code, documentation, designs,
+prompts, character personas, configuration, and all related materials (the
+"Software"), is the confidential and proprietary property of PacificAI and is
+protected by copyright and other intellectual property laws.
+
+1. No license is granted. Except as expressly permitted in a separate written
+   agreement signed by an authorized representative of PacificAI, no right or
+   license, express or implied, is granted to any person to use, copy, modify,
+   merge, publish, distribute, sublicense, sell, host, or create derivative
+   works of the Software, in whole or in part.
+
+2. Authorized use. Persons given access to the Software by PacificAI (for
+   example, employees, contractors, or invited users of a hosted instance) may
+   use it only for the purpose for which access was given, and only for as long
+   as PacificAI permits.
+
+3. Confidentiality. The Software and any non-public information about it are
+   confidential. You may not disclose them to any third party without
+   PacificAI's prior written consent.
+
+4. Restrictions. You may not reverse engineer, decompile, or disassemble the
+   Software (except to the extent applicable law expressly permits despite this
+   restriction), remove or alter any proprietary notices, or use the Software to
+   build a competing product.
+
+5. Ownership. PacificAI retains all right, title, and interest in and to the
+   Software, including all intellectual property rights. Any feedback or
+   suggestions you provide may be used by PacificAI without obligation to you.
+
+6. Third-party components. The Software includes or depends on third-party
+   components that are licensed under their own terms, listed in
+   THIRD_PARTY_NOTICES.md. Those terms govern those components, and nothing in
+   this license restricts rights you have under them.
+
+7. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+8. Limitation of liability. IN NO EVENT SHALL PACIFICAI BE LIABLE FOR ANY
+   CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT,
+   OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR
+   THE USE OF OR OTHER DEALINGS IN THE SOFTWARE.
+
+9. Termination. Any unauthorized use automatically terminates any permission
+   you may have had, and PacificAI may pursue all available remedies.
+
+For licensing enquiries, contact PacificAI.

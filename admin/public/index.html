@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- Hello Crew admin. Copyright (c) 2026 PacificAI. All rights reserved. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Hello Crew Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body>
+    <!-- Sign in -->
+    <main id="login" class="login" hidden>
+      <form id="login-form" class="login-card">
+        <div class="brand">🛡️ Hello Crew · Admin</div>
+        <h1>Sign in</h1>
+        <label><span>Username</span><input id="login-user" autocomplete="username" required /></label>
+        <label><span>Password</span><input id="login-pass" type="password" autocomplete="current-password" required /></label>
+        <p id="login-error" class="error" role="alert" hidden></p>
+        <button class="primary" type="submit">Sign in</button>
+        <p class="fine">Operators only. Every sign-in and action is recorded in the audit log.</p>
+      </form>
+    </main>
+
+    <!-- Dashboard -->
+    <div id="app" class="app" hidden>
+      <header class="top">
+        <div class="brand">🛡️ Hello Crew · Admin</div>
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+          <button role="tab" data-tab="users" aria-selected="false">Users</button>
+          <button role="tab" data-tab="audit" aria-selected="false">Audit log</button>
+        </nav>
+        <div class="who"><span id="who"></span><button id="btn-refresh" class="ghost" title="Refresh">↻</button><button id="btn-logout" class="ghost">Sign out</button></div>
+      </header>
+
+      <section id="tab-overview" class="tab">
+        <div id="cards" class="cards"></div>
+        <div class="grid2">
+          <div class="panel"><h2>Sign-ups, last 14 days</h2><div id="chart-signups" class="bars"></div></div>
+          <div class="panel"><h2>Messages sent, last 14 days</h2><div id="chart-activity" class="bars"></div></div>
+        </div>
+        <div class="panel">
+          <h2>Most-called characters, last 30 days</h2>
+          <table class="table"><thead><tr><th>Character</th><th class="num">Messages</th><th class="num">People</th></tr></thead><tbody id="personas"></tbody></table>
+        </div>
+      </section>
+
+      <section id="tab-users" class="tab" hidden>
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Search by name or email…" autocomplete="off" />
+          <span id="user-count" class="muted"></span>
+        </div>
+        <div class="panel flush">
+          <table class="table users">
+            <thead><tr><th>Name</th><th>Email</th><th>Joined</th><th>Last active</th><th class="num">Messages</th><th>Talks in</th><th>Status</th></tr></thead>
+            <tbody id="users"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="tab-audit" class="tab" hidden>
+        <div class="panel flush">
+          <table class="table"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="audit"></tbody></table>
+        </div>
+      </section>
+
+      <footer class="foot">© 2026 PacificAI. All rights reserved. Conversation contents are private and not shown here.</footer>
+    </div>
+
+    <!-- One user -->
+    <dialog id="user" class="user">
+      <div class="user-head">
+        <div><h2 id="u-name"></h2><div id="u-email" class="muted"></div></div>
+        <form method="dialog"><button class="ghost" aria-label="Close">✕</button></form>
+      </div>
+      <div id="u-body" class="user-body"></div>
+      <div class="user-actions">
+        <button id="u-revoke" class="ghost">Sign out everywhere</button>
+        <button id="u-suspend" class="ghost warn"></button>
+        <button id="u-delete" class="danger">Delete user…</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="admin.js"></script>
+  </body>
+</html>

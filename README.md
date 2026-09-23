@@ -18,14 +18,27 @@ Pick someone from the contact list and call them. Each character lives in their 
 - **Live captions, a call timer, and an optional self-view camera.**
 - **Web search.** A small "router" step decides when a question needs current information (weather, news, prices…). The character then searches DuckDuckGo, reads the top pages, and cites them.
 - **Your documents (RAG).** Upload a PDF or text file, or paste a link, from the chat drawer. The server embeds it with `nomic-embed-text`, and every character can answer from it.
-- **Accounts and memory.** Sign up with your name, email and password, and the crew remembers *you* on any device. Each character keeps your chat history with them. The whole crew shares a small profile: how you like to talk (e.g. Hinglish, short answers), key facts you've mentioned (city, diet, job, goals…), and Kiki's study progress, so she can pick up where you left off. A background step updates the profile after each reply. **🧠 Memory** on the home page shows everything they remember; you can forget any item or erase it all. Everything is stored locally in `data/hellocrew.db` (SQLite). Passwords are scrypt-hashed, and logins use an HttpOnly session cookie.
+- **Accounts and memory.** Sign up with your name, email and password, and the crew remembers *you* on any device. Each character keeps your chat history with them. The whole crew shares a small profile: how you like to talk (e.g. Hinglish, short answers), key facts you've mentioned (city, diet, job, goals…), and Kiki's study progress, so she can pick up where you left off. A background step updates the profile after each reply. **🧠 Memory** on the home page shows everything they remember; you can forget any item or erase it all. Everything is stored in your own PostgreSQL database. Passwords are scrypt-hashed, and logins use an HttpOnly session cookie.
+- **Admin panel** (operators only, at http://localhost:3001). It shows all users, sign-ups, activity by character, and each user's memory profile, and lets you suspend a user, sign them out everywhere, or delete them. Every action is audit-logged. Conversation text is never shown.
 - **AR.** On Android Chrome with ARCore, the **AR** button brings the character into your real room.
 
 Everything runs locally: [Ollama](https://ollama.com) for the chat model and embeddings, [Kokoro-82M](https://github.com/thewh1teagle/kokoro-onnx) for the voices (with [KittenTTS](https://github.com/KittenML/KittenTTS) as a fallback), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech recognition, and [ChromaDB](https://www.trychroma.com) for the textbooks. Characters and rooms are [Kenney](https://kenney.nl) assets (CC0).
 
-## Setup
+## Quick start (Docker, recommended)
 
-1. Install [Node.js 22.13+](https://nodejs.org) (for its built-in SQLite), [Ollama](https://ollama.com/download), and **Python 3.12 or older** (KittenTTS doesn't support 3.13 yet).
+The whole stack runs in Docker Compose and stays up: the app, the admin panel, PostgreSQL, Ollama (GPU), the voice service, textbook search, and nightly database backups.
+
+```powershell
+copy .env.example .env                                              # then fill in the blanks
+powershell -ExecutionPolicy Bypass -File deploy\scripts\seed-volumes.ps1   # optional: reuse downloaded models/books
+docker compose up -d --build
+```
+
+Then open the app at http://localhost:3000 and the admin panel at http://localhost:3001. **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** covers everything else: services, volumes, secrets, backups and restore, CI/CD, and moving to production.
+
+## Setup without Docker (development)
+
+1. Install [Node.js 22.13+](https://nodejs.org), [Ollama](https://ollama.com/download), and **Python 3.12 or older** (KittenTTS doesn't support 3.13 yet). You also need PostgreSQL. The easiest way is `docker compose up -d postgres`, with `DATABASE_URL` in `.env` pointing at it.
 2. Pull the models:
    ```sh
    ollama pull qwen3.5:4b
@@ -100,7 +113,8 @@ Restart the server, and new sign-ups must enter the code. Existing users sign in
 | `TTS_URL` / `NCERT_URL` | `:5005` / `:5006` | Where the Python helpers listen |
 | `TTS_AUTOSTART` / `NCERT_AUTOSTART` | on | Set to `0` to run a helper yourself |
 | `NCERT_DB` | `data/chroma` | ChromaDB folder for the textbooks |
-| `DB_PATH` | `data/hellocrew.db` | SQLite file for accounts and memory |
+| `DATABASE_URL` | `postgres://hellocrew:…@127.0.0.1:5433/hellocrew` | PostgreSQL for accounts and memory (set automatically in Docker) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / none | Admin panel login. The password must be 12+ characters |
 | `INVITE_CODE` | none (open sign-up) | Code(s) needed to create an account, comma-separated. Set this before sharing a link |
 | `DEBUG_CHAT` | off | Log Kiki's extracted study context |
 | `SSL_KEY` / `SSL_CERT` | none | Serve HTTPS directly |
@@ -109,9 +123,14 @@ Restart the server, and new sign-ups must enter the code. Existing users sign in
 
 ```
 server.js            Static files, accounts (/api/auth), /api/chat (NDJSON events), /api/call, /api/memory, /api/docs, /api/tts; starts the Python helpers
-lib/db.js            SQLite schema: users, sessions, messages, memory
+lib/db.js            PostgreSQL pool + versioned migrations: users, sessions, messages, memory, admin audit
 lib/auth.js          Sign up / sign in (scrypt), session cookies, login rate limiting
 lib/memory.js        Per-user chat history, the shared profile (language, style, facts, study), learning from each turn, greetings
+admin/               Admin panel (separate service, same image): users, stats, account controls, audit log
+docker/              Dockerfiles: node (app + admin), python (voice / ncert targets)
+compose.yaml         The stack; deploy/compose.prod.yaml adds production overrides
+deploy/              Backup loop, volume seeding, Tailscale Funnel config
+.github/workflows/   CI (checks + image builds) and release (push images to GHCR)
 lib/personas.js      The eight characters: voice, model, room, prompt
 lib/chat.js          One turn: links, then documents, then the NCERT textbook or a web-search decision, then a streamed reply
 lib/web.js           DuckDuckGo search, safe page fetching (private-network guard), HTML to text
@@ -131,3 +150,7 @@ public/docs.js       PDF to text in the browser (pdf.js), document API calls
 **Notes:**
 - With the Python voice service running, speech recognition happens on your machine. Without it, the app falls back to the browser's Web Speech API, which in Chrome and Edge sends audio to the vendor's cloud service. It doesn't work at all in Brave, Opera or some embedded browsers.
 - Windows: `tts_server.py` skips KittenTTS's unused `misaki`/spaCy import. That library's DLLs are blocked by Smart App Control. Kokoro runs on ONNX Runtime, which isn't blocked.
+
+## License
+
+**Proprietary. © 2026 PacificAI. All rights reserved.** No use, copying, modification or distribution is allowed without PacificAI's written permission. See [LICENSE](LICENSE). Third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

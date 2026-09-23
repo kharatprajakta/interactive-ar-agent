@@ -1,6 +1,7 @@
-// Zero-dependency web server: serves the front end from ./public, handles
-// accounts and per-user memory (SQLite), runs the persona chat pipeline
-// (Ollama + web search + document RAG), and proxies the Python voice service.
+// Hello Crew web server: serves the front end from ./public, handles accounts
+// and per-user memory (PostgreSQL), runs the persona chat pipeline (Ollama +
+// web search + document RAG), and proxies the Python voice service.
+// Copyright (c) 2026 PacificAI. All rights reserved.
 import http from 'node:http';
 import https from 'node:https';
 import { readFile } from 'node:fs/promises';
@@ -14,6 +15,7 @@ import { addDocument, listDocuments, removeDocument, EMBED_MODEL } from './lib/r
 import { fetchPage } from './lib/web.js';
 import { AuthError, signUp, logIn, renameUser, createSession, userFromRequest, endSession, inviteRequired } from './lib/auth.js';
 import { getHistory, addMessage, historyCounts, getMemory, forget, eraseAll, saveStudy, learnFromTurn, memoryNote, greetingFor } from './lib/memory.js';
+import { ready as dbReady, query } from './lib/db.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -168,8 +170,8 @@ async function handleChat(req, res, user) {
   if (messages.at(-1)?.role !== 'user') return sendText(res, 400, 'The last message must be from the user');
 
   const question = messages.at(-1).content;
-  const memory = getMemory(user.id);
-  addMessage(user.id, persona.id, 'user', question);
+  const memory = await getMemory(user.id);
+  await addMessage(user.id, persona.id, 'user', question);
 
   const controller = new AbortController();
   res.on('close', () => controller.abort());
@@ -191,7 +193,7 @@ async function handleChat(req, res, user) {
     for await (const event of events) {
       if (controller.signal.aborted) break;
       if (event.type === 'text') reply += event.text;
-      if (event.type === 'study') saveStudy(user.id, event);
+      if (event.type === 'study') await saveStudy(user.id, event);
       res.write(JSON.stringify(event) + '\n');
     }
   } catch (err) {
@@ -200,10 +202,13 @@ async function handleChat(req, res, user) {
       res.write(JSON.stringify({ type: 'error', text: err.message }) + '\n');
     }
   }
+  // Decide this before res.end(): the socket's 'close' fires right after and
+  // would make a finished reply look interrupted.
+  const interrupted = controller.signal.aborted;
   res.end();
   if (reply.trim()) {
-    addMessage(user.id, persona.id, 'assistant', controller.signal.aborted ? `${reply}…` : reply);
-    if (!controller.signal.aborted) learnFromTurn(user.id, question, reply);
+    await addMessage(user.id, persona.id, 'assistant', interrupted ? `${reply}…` : reply);
+    if (!interrupted) learnFromTurn(user.id, question);
   }
 }
 
@@ -225,18 +230,18 @@ function clientIp(req) {
 
 async function handleAuth(req, res, action) {
   if (action === 'me' && req.method === 'GET') {
-    return sendJson(res, 200, { user: userFromRequest(req), inviteRequired: inviteRequired() });
+    return sendJson(res, 200, { user: await userFromRequest(req), inviteRequired: inviteRequired() });
   }
   if (req.method !== 'POST') return sendText(res, 405, 'Method not allowed');
   if (action === 'logout') {
-    res.setHeader('Set-Cookie', endSession(req));
+    res.setHeader('Set-Cookie', await endSession(req));
     return sendJson(res, 200, { ok: true });
   }
   const body = (await readJson(req, 10_000)) || {};
   try {
     const user = action === 'signup' ? await signUp(body, clientIp(req)) : action === 'login' ? await logIn(body) : null;
     if (!user) return sendText(res, 404, 'Not found');
-    res.setHeader('Set-Cookie', createSession(user.id, isSecure(req)));
+    res.setHeader('Set-Cookie', await createSession(user.id, isSecure(req)));
     return sendJson(res, 200, { user });
   } catch (err) {
     if (err instanceof AuthError) return sendJson(res, err.status, { error: err.message });
@@ -245,29 +250,29 @@ async function handleAuth(req, res, action) {
 }
 
 /** A call is starting: the history with this character and a personal greeting. */
-function handleCallStart(res, user, url) {
+async function handleCallStart(res, user, url) {
   const persona = PERSONAS.find((p) => p.id === url.searchParams.get('persona'));
   if (!persona) return sendText(res, 400, 'Unknown persona');
-  const history = getHistory(user.id, persona.id);
-  const greeting = greetingFor(persona, user, getMemory(user.id), history.length > 0);
+  const history = await getHistory(user.id, persona.id);
+  const greeting = greetingFor(persona, user, await getMemory(user.id), history.length > 0);
   sendJson(res, 200, { history, greeting });
 }
 
 async function handleMemory(req, res, user, url) {
   if (req.method === 'GET') {
-    return sendJson(res, 200, { user, memory: getMemory(user.id), history: historyCounts(user.id) });
+    return sendJson(res, 200, { user, memory: await getMemory(user.id), history: await historyCounts(user.id) });
   }
   if (req.method === 'DELETE') {
     const fact = url.searchParams.get('fact');
     const field = url.searchParams.get('field');
-    if (fact || field) forget(user.id, { fact, field });
-    else eraseAll(user.id);
+    if (fact || field) await forget(user.id, { fact, field });
+    else await eraseAll(user.id);
     return sendJson(res, 200, { ok: true });
   }
   if (req.method === 'POST') {
     const body = (await readJson(req, 10_000)) || {};
     try {
-      return sendJson(res, 200, { user: { ...user, name: renameUser(user.id, body.name) } });
+      return sendJson(res, 200, { user: { ...user, name: await renameUser(user.id, body.name) } });
     } catch (err) {
       if (err instanceof AuthError) return sendJson(res, err.status, { error: err.message });
       throw err;
@@ -354,6 +359,11 @@ async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const { pathname } = url;
   try {
+    // Liveness for Docker/monitoring: the process is up and the database answers.
+    if (pathname === '/healthz') {
+      await query('SELECT 1');
+      return sendJson(res, 200, { ok: true });
+    }
     // Public: sign in/up, and what the landing page needs to render.
     const auth = pathname.match(/^\/api\/auth\/(signup|login|logout|me)$/);
     if (auth) return await handleAuth(req, res, auth[1]);
@@ -363,10 +373,10 @@ async function handler(req, res) {
 
     // Everything else under /api needs a signed-in user.
     if (pathname.startsWith('/api/')) {
-      const user = userFromRequest(req);
+      const user = await userFromRequest(req);
       if (!user) return sendJson(res, 401, { error: 'Please sign in.' });
       if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res, user);
-      if (pathname === '/api/call' && req.method === 'GET') return handleCallStart(res, user, url);
+      if (pathname === '/api/call' && req.method === 'GET') return await handleCallStart(res, user, url);
       if (pathname === '/api/memory') return await handleMemory(req, res, user, url);
       if (pathname === '/api/docs') return await handleDocs(req, res, url, user);
       if (pathname === '/api/tts' && req.method === 'POST') return await handleTts(req, res);
@@ -389,9 +399,11 @@ const server = useHttps
   ? https.createServer({ key: readFileSync(process.env.SSL_KEY), cert: readFileSync(process.env.SSL_CERT) }, handler)
   : http.createServer(handler);
 
+// The schema must be current before we take requests (Postgres may still be starting).
+await dbReady();
 server.listen(PORT, HOST, () => {
   const scheme = useHttps ? 'https' : 'http';
-  console.log(`AI call app running at ${scheme}://localhost:${PORT}`);
+  console.log(`Hello Crew running at ${scheme}://localhost:${PORT}`);
   console.log(`Using Ollama model "${CHAT_MODEL}" (+ "${EMBED_MODEL}" for documents) at ${OLLAMA_URL}`);
   console.log(inviteRequired() ? 'Sign-up needs an invite code (INVITE_CODE).' : 'Sign-up is open to anyone who can reach this server. Set INVITE_CODE before sharing a public link.');
 });

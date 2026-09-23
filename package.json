@@ -1,14 +1,21 @@
 {
-  "name": "interactive-ar-agent",
-  "version": "0.1.0",
+  "name": "hello-crew",
+  "version": "0.2.0",
   "private": true,
-  "description": "Hands-free video calls with AI personalities in their own 3D rooms (three.js, Ollama, KittenTTS, RAG).",
+  "description": "Hands-free video calls with AI personalities in their own 3D rooms (three.js, Ollama, Kokoro, Whisper, RAG).",
+  "author": "PacificAI",
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --env-file-if-exists=.env --watch server.js"
+    "dev": "node --env-file-if-exists=.env --watch server.js",
+    "admin": "node --env-file-if-exists=.env admin/server.js",
+    "check": "node scripts/check.js"
   },
   "engines": {
     "node": ">=22.13"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
   }
 }
