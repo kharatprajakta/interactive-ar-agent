@@ -86,6 +86,23 @@ button.danger { background: rgba(255, 77, 94, 0.12); border-color: rgba(255, 77,
 .pill.ok { background: rgba(47, 214, 123, 0.14); color: #7de8ab; }
 .pill.warn { background: rgba(255, 176, 32, 0.14); color: #ffd98a; }
 
+/* Invites */
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.modes button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); text-align: left; }
+.modes button span { color: var(--muted); font-size: 13px; }
+.modes button[aria-checked='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.invite-form { display: flex; flex-direction: column; gap: 12px; }
+.invite-form h2 { margin-bottom: 0; }
+.invite-form .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.invite-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.invite-form input { padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); color: var(--text); font-size: 14px; }
+.invite-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.invite-form .primary { align-self: flex-start; }
+.code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; padding: 2px 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); }
+button.small { padding: 3px 9px; font-size: 12px; }
+.danger-text { color: #ff9aa4; }
+td.actions { white-space: nowrap; text-align: right; }
+
 /* One user */
 .user { width: min(100% - 32px, 560px); max-height: 88vh; padding: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); color: var(--text); }
 .user[open] { display: flex; flex-direction: column; }

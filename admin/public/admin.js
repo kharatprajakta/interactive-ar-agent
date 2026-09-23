@@ -94,8 +94,82 @@ $('btn-refresh').addEventListener('click', () => refresh());
 async function refresh() {
   if (tab === 'overview') await loadOverview();
   else if (tab === 'users') await loadUsers();
+  else if (tab === 'invites') await loadInvites();
   else await loadAudit();
 }
+
+// ---------------------------------------------------------------------------
+// Invites
+// ---------------------------------------------------------------------------
+async function loadInvites() {
+  const { mode, invites } = await api('/api/invites');
+  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+  $('invites').replaceChildren(
+    ...(invites.length
+      ? invites.map((i) => {
+          const status = i.disabled ? ['warn', 'Disabled'] : i.expired ? ['warn', 'Expired'] : i.max_uses && i.uses >= i.max_uses ? ['warn', 'Used up'] : ['ok', 'Active'];
+          const copy = el('button', { class: 'ghost small', title: 'Copy code' }, 'Copy');
+          copy.addEventListener('click', async () => {
+            await navigator.clipboard.writeText(i.code).catch(() => {});
+            copy.textContent = 'Copied ✓';
+            setTimeout(() => (copy.textContent = 'Copy'), 1500);
+          });
+          const toggle = el('button', { class: 'ghost small' }, i.disabled ? 'Enable' : 'Disable');
+          toggle.addEventListener('click', () => inviteAction(`/api/invites/${i.id}/${i.disabled ? 'enable' : 'disable'}`, 'POST'));
+          const del = el('button', { class: 'ghost small danger-text' }, 'Delete');
+          del.addEventListener('click', () =>
+            inviteAction(`/api/invites/${i.id}`, 'DELETE', `Delete the code ${i.code}? People who already joined with it keep their accounts.`),
+          );
+          return el('tr', {},
+            el('td', {}, el('code', { class: 'code' }, i.code), ' ', copy),
+            el('td', {}, i.label || el('span', { class: 'muted' }, '—')),
+            el('td', { class: 'num' }, `${i.uses}${i.max_uses ? ` / ${i.max_uses}` : ''}`),
+            el('td', {}, i.expires_at ? fmtDate(i.expires_at) : el('span', { class: 'muted' }, 'Never')),
+            el('td', {}, el('span', { class: `pill ${status[0]}` }, status[1])),
+            el('td', { title: i.joined.join(', ') }, i.joined.length ? i.joined.slice(0, 3).join(', ') + (i.joined.length > 3 ? ` +${i.joined.length - 3}` : '') : el('span', { class: 'muted' }, '—')),
+            el('td', { class: 'actions' }, toggle, del),
+          );
+        })
+      : [el('tr', {}, el('td', { colspan: 7, class: 'muted' }, 'No invite codes yet. Create one above.'))]),
+  );
+}
+
+async function inviteAction(path, method, confirmText) {
+  if (confirmText && !confirm(confirmText)) return;
+  try {
+    await api(path, { method });
+    await loadInvites();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+for (const b of document.querySelectorAll('[data-mode]')) {
+  b.addEventListener('click', async () => {
+    const mode = b.dataset.mode;
+    if (mode === 'open' && !confirm('Open sign-up lets ANYONE with the link create an account and use this machine. Continue?')) return;
+    await api('/api/settings/signup-mode', { method: 'POST', body: { mode } }).catch((err) => alert(err.message));
+    await loadInvites();
+  });
+}
+
+$('invite-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('inv-error').hidden = true;
+  try {
+    const { code } = await api('/api/invites', {
+      method: 'POST',
+      body: { label: $('inv-label').value, max_uses: $('inv-max').value || null, expires_days: $('inv-days').value || null, code: $('inv-code').value },
+    });
+    for (const id of ['inv-label', 'inv-max', 'inv-days', 'inv-code']) $(id).value = '';
+    await loadInvites();
+    await navigator.clipboard.writeText(code).catch(() => {});
+    alert(`Created ${code} (copied to the clipboard). Share it together with the app link.`);
+  } catch (err) {
+    $('inv-error').textContent = err.message;
+    $('inv-error').hidden = false;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Overview
@@ -173,6 +247,7 @@ async function openUser(id) {
   $('u-body').replaceChildren(
     section('Account',
       kv('Joined', fmtDateTime(d.user.created_at)),
+      kv('Invite code', d.user.invite_code ? `${d.user.invite_code}${d.user.invite_label ? ` (${d.user.invite_label})` : ''}` : '—'),
       kv('Last active', `${ago(d.user.last_seen_at)} (${fmtDateTime(d.user.last_seen_at)})`),
       kv('Status', d.user.disabled ? 'Suspended' : 'Active'),
       kv('Signed-in devices', d.sessions.active),
@@ -222,7 +297,19 @@ $('u-delete').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // Audit log
 // ---------------------------------------------------------------------------
-const ACTIONS = { login: 'Signed in', login_failed: 'Failed sign-in', suspend: 'Suspended user', unsuspend: 'Unsuspended user', sign_out_everywhere: 'Signed user out everywhere', delete_user: 'Deleted user' };
+const ACTIONS = {
+  login: 'Signed in',
+  login_failed: 'Failed sign-in',
+  suspend: 'Suspended user',
+  unsuspend: 'Unsuspended user',
+  sign_out_everywhere: 'Signed user out everywhere',
+  delete_user: 'Deleted user',
+  create_invite: 'Created invite code',
+  disable_invite: 'Disabled invite code',
+  enable_invite: 'Enabled invite code',
+  delete_invite: 'Deleted invite code',
+  signup_mode: 'Changed sign-up mode',
+};
 
 async function loadAudit() {
   const { entries } = await api('/api/audit');

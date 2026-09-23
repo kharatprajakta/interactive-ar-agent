@@ -83,8 +83,9 @@ docker compose run --rm ncert python -m ncert.ingest download jesc1   # index mo
 | `deploy/production.env` | ❌ gitignored | Production values. Make it from `.env.example` on the server |
 | `deploy/compose.prod.yaml` | ✅ | Production overrides: released images, no DB port, pinned Ollama |
 
+**Invite codes and sign-up mode** are managed in the admin panel's **Invites** tab. There you can choose *Invite only*, *Open* or *Closed*; create codes with a label, a max number of people and an expiry; and disable or delete codes. Changes take effect immediately. `INVITE_CODE` in `.env` only seeds codes on startup.
+
 **Rotating secrets:**
-- **Invite code:** edit `INVITE_CODE`, then `docker compose up -d app`.
 - **Admin password:** edit `ADMIN_PASSWORD`, then `docker compose up -d admin`.
 - **Database password:** change it inside Postgres first (`ALTER USER hellocrew PASSWORD '…'`), then update `.env` and run `docker compose up -d`.
 

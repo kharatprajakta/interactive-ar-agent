@@ -45,7 +45,7 @@ a { color: inherit; }
 }
 .auth-card h1 { margin: 0; font-size: 26px; font-weight: 900; line-height: 1.2; }
 .auth-sub { margin: 8px 0 18px; color: var(--muted); font-size: 15px; line-height: 1.5; }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 18px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); }
+.auth-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; margin-bottom: 18px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); }
 .auth-tabs button { padding: 9px; border: 0; border-radius: 10px; background: none; font-weight: 800; color: var(--muted); }
 .auth-tabs button[aria-selected='true'] { background: rgba(255, 255, 255, 0.92); color: #111; }
 .auth-form { display: flex; flex-direction: column; gap: 14px; }

@@ -32,6 +32,7 @@
         <nav class="tabs" role="tablist">
           <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
           <button role="tab" data-tab="users" aria-selected="false">Users</button>
+          <button role="tab" data-tab="invites" aria-selected="false">Invites</button>
           <button role="tab" data-tab="audit" aria-selected="false">Audit log</button>
         </nav>
         <div class="who"><span id="who"></span><button id="btn-refresh" class="ghost" title="Refresh">↻</button><button id="btn-logout" class="ghost">Sign out</button></div>
@@ -58,6 +59,36 @@
           <table class="table users">
             <thead><tr><th>Name</th><th>Email</th><th>Joined</th><th>Last active</th><th class="num">Messages</th><th>Talks in</th><th>Status</th></tr></thead>
             <tbody id="users"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="tab-invites" class="tab" hidden>
+        <div class="panel">
+          <h2>Who can sign up</h2>
+          <div class="modes" role="radiogroup" aria-label="Sign-up mode">
+            <button role="radio" data-mode="invite"><b>🎟️ Invite only</b><span>New people need a valid code</span></button>
+            <button role="radio" data-mode="open"><b>🌍 Open</b><span>Anyone with the link can sign up</span></button>
+            <button role="radio" data-mode="closed"><b>🔒 Closed</b><span>No new sign-ups; existing users can sign in</span></button>
+          </div>
+        </div>
+
+        <form id="invite-form" class="panel invite-form">
+          <h2>Create an invite code</h2>
+          <div class="fields">
+            <label><span>Label</span><input id="inv-label" maxlength="60" placeholder="e.g. Family, Class 10 batch" /></label>
+            <label><span>Max people</span><input id="inv-max" type="number" min="1" max="100000" placeholder="Unlimited" /></label>
+            <label><span>Expires in (days)</span><input id="inv-days" type="number" min="1" max="3650" placeholder="Never" /></label>
+            <label><span>Code</span><input id="inv-code" maxlength="40" placeholder="Random (recommended)" autocomplete="off" spellcheck="false" /></label>
+          </div>
+          <p id="inv-error" class="error" hidden></p>
+          <button class="primary" type="submit">Create code</button>
+        </form>
+
+        <div class="panel flush">
+          <table class="table">
+            <thead><tr><th>Code</th><th>Label</th><th class="num">Used</th><th>Expires</th><th>Status</th><th>Joined</th><th></th></tr></thead>
+            <tbody id="invites"></tbody>
           </table>
         </div>
       </section>
