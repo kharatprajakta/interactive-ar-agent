@@ -1,2 +1,8 @@
-# KittenTTS voice service (tts_server.py). Needs Python 3.8-3.12.
+# Python helpers (need Python 3.8-3.12):
+#   tts_server.py  - Kokoro (or KittenTTS) voices + Whisper speech recognition
+#   ncert/         - NCERT textbook search (ChromaDB + pypdf)
 kittentts @ https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
+chromadb>=1.0
+pypdf>=5.0
+faster-whisper>=1.1
+kokoro-onnx>=0.4

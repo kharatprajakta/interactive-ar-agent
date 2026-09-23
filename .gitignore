@@ -8,6 +8,9 @@ venv/
 __pycache__/
 *.py[cod]
 
+# Local data: NCERT ChromaDB + downloaded textbook PDFs
+data/
+
 # Secrets and local config
 .env
 .env.*
