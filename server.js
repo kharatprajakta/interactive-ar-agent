@@ -1,5 +1,6 @@
-// Zero-dependency web server: serves the AR front end from ./public and
-// proxies chat requests to a local Ollama instance, streaming tokens back.
+// Zero-dependency web server: serves the front end from ./public, runs the
+// persona chat pipeline (Ollama + web search + document RAG), and proxies
+// text-to-speech to the KittenTTS service.
 import http from 'node:http';
 import https from 'node:https';
 import { readFile } from 'node:fs/promises';
@@ -7,24 +8,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PERSONAS, publicPersona } from './lib/personas.js';
+import { respond, CHAT_MODEL } from './lib/chat.js';
+import { addDocument, listDocuments, removeDocument, EMBED_MODEL } from './lib/rag.js';
+import { fetchPage } from './lib/web.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
-const MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const TTS_URL = (process.env.TTS_URL || 'http://127.0.0.1:5005').replace(/\/$/, '');
-const MAX_HISTORY = 20;
+const NCERT_URL = (process.env.NCERT_URL || 'http://127.0.0.1:5006').replace(/\/$/, '');
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = resolve(ROOT_DIR, 'public');
-
-const SYSTEM_PROMPT =
-  process.env.SYSTEM_PROMPT ||
-  `You are Nova, a friendly, curious little robot companion who appears in the user's room through augmented reality.
-Everything you say is spoken aloud by a text-to-speech voice, so:
-- Keep replies short and conversational: usually 1-3 sentences.
-- Never use markdown, bullet points, code blocks, emojis, or URLs.
-- Write numbers and symbols the way they should be spoken.
-Be warm and playful, but genuinely helpful. If you don't know something, say so.`;
+const MAX_DOC_CHARS = 2_000_000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -36,6 +32,7 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.glb': 'model/gltf-binary',
   '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 function sendJson(res, status, data) {
@@ -49,6 +46,10 @@ function sendText(res, status, text) {
 }
 
 function readBody(req, limit = 1_000_000) {
+  return readBuffer(req, limit).then((buf) => buf.toString('utf8'));
+}
+
+function readBuffer(req, limit) {
   return new Promise((resolveBody, reject) => {
     let size = 0;
     const chunks = [];
@@ -61,9 +62,21 @@ function readBody(req, limit = 1_000_000) {
         chunks.push(chunk);
       }
     });
-    req.on('end', () => resolveBody(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => resolveBody(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+async function readJson(req, limit) {
+  try {
+    return JSON.parse(await readBody(req, limit));
+  } catch {
+    return null;
+  }
+}
+
+function validSession(id) {
+  return typeof id === 'string' && /^[\w-]{8,64}$/.test(id);
 }
 
 async function serveStatic(req, res) {
@@ -87,6 +100,9 @@ async function serveStatic(req, res) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
 async function ttsHealth() {
   try {
     const r = await fetch(`${TTS_URL}/health`, { signal: AbortSignal.timeout(2000) });
@@ -96,29 +112,108 @@ async function ttsHealth() {
   }
 }
 
-async function handleHealth(res) {
-  const tts = await ttsHealth();
+async function ncertHealth() {
   try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`);
-    const { models = [] } = await r.json();
-    const names = models.map((m) => m.name);
-    const hasModel = names.includes(MODEL) || names.includes(`${MODEL}:latest`);
-    sendJson(res, 200, {
-      ok: hasModel,
-      model: MODEL,
-      models: names,
-      tts,
-      error: hasModel ? null : `Model "${MODEL}" isn't downloaded yet. Run: ollama pull ${MODEL}`,
-    });
+    return await (await fetch(`${NCERT_URL}/health`, { signal: AbortSignal.timeout(2000) })).json();
   } catch {
-    sendJson(res, 200, {
-      ok: false,
-      model: MODEL,
-      models: [],
-      tts,
-      error: `Can't reach Ollama at ${OLLAMA_URL}. Start it with: ollama serve`,
-    });
+    return { ok: false };
   }
+}
+
+async function handleHealth(res) {
+  const [tts, ncert] = await Promise.all([ttsHealth(), ncertHealth()]);
+  let names = [];
+  let error = null;
+  try {
+    const { models = [] } = await (await fetch(`${OLLAMA_URL}/api/tags`)).json();
+    names = models.map((m) => m.name);
+  } catch {
+    error = `Can't reach Ollama at ${OLLAMA_URL}. Start it with: ollama serve`;
+  }
+  const has = (m) => names.includes(m) || names.includes(`${m}:latest`);
+  if (!error && !has(CHAT_MODEL)) error = `Model "${CHAT_MODEL}" isn't downloaded yet. Run: ollama pull ${CHAT_MODEL}`;
+  sendJson(res, 200, {
+    ok: !error,
+    model: CHAT_MODEL,
+    rag: has(EMBED_MODEL),
+    tts,
+    ncert,
+    error,
+    warning: !error && !has(EMBED_MODEL) ? `Document search is off until you run: ollama pull ${EMBED_MODEL}` : null,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Chat: newline-delimited JSON events (see lib/chat.js)
+// ---------------------------------------------------------------------------
+async function handleChat(req, res) {
+  const body = await readJson(req);
+  if (!body) return sendText(res, 400, 'Invalid JSON body');
+  const persona = PERSONAS.find((p) => p.id === body.persona);
+  if (!persona) return sendText(res, 400, 'Unknown persona');
+  if (!validSession(body.session)) return sendText(res, 400, 'Missing session');
+  const messages = (Array.isArray(body.messages) ? body.messages : []).filter(
+    (m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string' && m.content.trim(),
+  );
+  if (messages.at(-1)?.role !== 'user') return sendText(res, 400, 'The last message must be from the user');
+
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no',
+  });
+  try {
+    for await (const event of respond({ persona, messages, sessionId: body.session, signal: controller.signal })) {
+      if (controller.signal.aborted) break;
+      res.write(JSON.stringify(event) + '\n');
+    }
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      console.error('Chat error:', err.message);
+      res.write(JSON.stringify({ type: 'error', text: err.message }) + '\n');
+    }
+  }
+  res.end();
+}
+
+// ---------------------------------------------------------------------------
+// Documents (RAG): PDFs are parsed in the browser and arrive as text.
+// ---------------------------------------------------------------------------
+async function handleDocs(req, res, url) {
+  const session = url.searchParams.get('session');
+  if (req.method === 'GET') {
+    if (!validSession(session)) return sendText(res, 400, 'Missing session');
+    return sendJson(res, 200, { docs: listDocuments(session) });
+  }
+  if (req.method === 'DELETE') {
+    if (!validSession(session)) return sendText(res, 400, 'Missing session');
+    return sendJson(res, 200, { removed: removeDocument(session, url.searchParams.get('id')) });
+  }
+  if (req.method === 'POST') {
+    const body = await readJson(req, 8_000_000);
+    if (!body || !validSession(body.session)) return sendText(res, 400, 'Invalid request');
+    try {
+      let doc;
+      if (body.url) {
+        const page = await fetchPage(body.url);
+        doc = await addDocument(body.session, { title: page.title, text: page.text, source: page.url, type: 'link' });
+      } else if (typeof body.text === 'string' && body.text.trim()) {
+        doc = await addDocument(body.session, {
+          title: String(body.title || 'Document').slice(0, 200),
+          text: body.text.slice(0, MAX_DOC_CHARS),
+          type: body.type === 'pdf' ? 'pdf' : 'text',
+        });
+      } else {
+        return sendText(res, 400, 'Send either a url or some text');
+      }
+      return sendJson(res, 200, { doc });
+    } catch (err) {
+      return sendJson(res, 422, { error: err.message });
+    }
+  }
+  sendText(res, 405, 'Method not allowed');
 }
 
 async function handleTts(req, res) {
@@ -137,82 +232,37 @@ async function handleTts(req, res) {
   res.end(audio);
 }
 
-async function handleChat(req, res) {
-  let body;
+// Speech-to-text: the browser sends raw 16 kHz 16-bit PCM of one utterance.
+async function handleStt(req, res) {
+  let audio;
   try {
-    body = JSON.parse(await readBody(req));
+    audio = await readBuffer(req, 16000 * 2 * 60);
   } catch {
-    return sendText(res, 400, 'Invalid JSON body');
+    return sendText(res, 413, 'Audio too long');
   }
-
-  const messages = (Array.isArray(body.messages) ? body.messages : [])
-    .filter((m) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string')
-    .slice(-MAX_HISTORY);
-  if (!messages.length) return sendText(res, 400, 'No messages provided');
-
-  // Stop generating if the browser goes away (e.g. user interrupts).
-  const controller = new AbortController();
-  res.on('close', () => controller.abort());
-
-  let upstream;
   try {
-    upstream = await fetch(`${OLLAMA_URL}/api/chat`, {
+    const upstream = await fetch(`${TTS_URL}/stt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        stream: true,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-        options: { temperature: 0.7 },
-      }),
-      signal: controller.signal,
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: audio,
+      signal: AbortSignal.timeout(30000),
     });
+    res.writeHead(upstream.status, { 'Content-Type': MIME['.json'] });
+    res.end(Buffer.from(await upstream.arrayBuffer()));
   } catch {
-    return sendText(res, 502, `Can't reach Ollama at ${OLLAMA_URL}. Is it running? (ollama serve)`);
+    sendJson(res, 502, { error: `Can't reach the speech service at ${TTS_URL}` });
   }
-
-  if (!upstream.ok) {
-    const detail = await upstream.text().catch(() => '');
-    const hint = upstream.status === 404 ? ` Try: ollama pull ${MODEL}` : '';
-    return sendText(res, 502, `Ollama error ${upstream.status}: ${detail}${hint}`);
-  }
-
-  res.writeHead(200, {
-    'Content-Type': 'text/plain; charset=utf-8',
-    'Cache-Control': 'no-cache',
-    'X-Accel-Buffering': 'no',
-  });
-
-  // Ollama streams newline-delimited JSON; forward just the text tokens.
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    for await (const chunk of upstream.body) {
-      buffer += decoder.decode(chunk, { stream: true });
-      let nl;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-        const data = JSON.parse(line);
-        if (data.error) throw new Error(data.error);
-        if (data.message?.content) res.write(data.message.content);
-      }
-    }
-  } catch (err) {
-    if (!controller.signal.aborted) {
-      console.error('Stream error:', err.message);
-      res.write(`\n[error: ${err.message}]`);
-    }
-  }
-  res.end();
 }
 
 async function handler(req, res) {
-  const { pathname } = new URL(req.url, 'http://localhost');
+  const url = new URL(req.url, 'http://localhost');
+  const { pathname } = url;
   try {
     if (pathname === '/api/chat' && req.method === 'POST') return await handleChat(req, res);
+    if (pathname === '/api/personas' && req.method === 'GET') return sendJson(res, 200, { personas: PERSONAS.map(publicPersona) });
+    if (pathname === '/api/docs') return await handleDocs(req, res, url);
     if (pathname === '/api/tts' && req.method === 'POST') return await handleTts(req, res);
+    if (pathname === '/api/stt' && req.method === 'POST') return await handleStt(req, res);
     if (pathname === '/api/health' && req.method === 'GET') return await handleHealth(res);
     if (req.method === 'GET' || req.method === 'HEAD') return await serveStatic(req, res);
     sendText(res, 405, 'Method not allowed');
@@ -223,44 +273,44 @@ async function handler(req, res) {
   }
 }
 
-// Camera + WebXR need a secure context. localhost counts as secure; for a phone
-// on your LAN, provide a certificate via SSL_KEY / SSL_CERT (or use a tunnel).
+// Camera, mic and WebXR need a secure context. localhost counts as secure; for
+// a phone on your LAN, provide a certificate via SSL_KEY / SSL_CERT (or use a tunnel).
 const useHttps = process.env.SSL_KEY && process.env.SSL_CERT;
 const server = useHttps
-  ? https.createServer(
-      { key: readFileSync(process.env.SSL_KEY), cert: readFileSync(process.env.SSL_CERT) },
-      handler,
-    )
+  ? https.createServer({ key: readFileSync(process.env.SSL_KEY), cert: readFileSync(process.env.SSL_CERT) }, handler)
   : http.createServer(handler);
 
 server.listen(PORT, HOST, () => {
   const scheme = useHttps ? 'https' : 'http';
-  console.log(`AR agent running at ${scheme}://localhost:${PORT}`);
-  console.log(`Using Ollama model "${MODEL}" at ${OLLAMA_URL}`);
+  console.log(`AI call app running at ${scheme}://localhost:${PORT}`);
+  console.log(`Using Ollama model "${CHAT_MODEL}" (+ "${EMBED_MODEL}" for documents) at ${OLLAMA_URL}`);
 });
 
-// Start the KittenTTS service alongside us if its Python venv is set up and
-// nothing is already listening. Without it, the browser's built-in voice is used.
-async function startTtsService() {
-  if (process.env.TTS_AUTOSTART === '0' || (await ttsHealth()).ok) return;
-  const python = resolve(ROOT_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
-  if (!existsSync(python)) {
-    console.log('KittenTTS not set up (no .venv); using the browser voice. See README to enable it.');
+// Start the Python helpers (KittenTTS voice, NCERT textbook search) alongside
+// us if the venv is set up and nothing is already listening on their ports.
+const PYTHON = resolve(ROOT_DIR, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python');
+const children = [];
+process.on('exit', () => children.forEach((c) => c.kill()));
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit());
+
+async function startPythonService({ name, args, healthUrl, env }) {
+  if (process.env[`${name.toUpperCase()}_AUTOSTART`] === '0') return;
+  try {
+    if ((await fetch(healthUrl, { signal: AbortSignal.timeout(1500) })).ok) return; // already running
+  } catch {}
+  if (!existsSync(PYTHON)) {
+    console.log(`[${name}] Python venv not set up (no .venv), so ${name} is off. See README.`);
     return;
   }
-  const child = spawn(python, ['-u', 'tts_server.py'], {
-    cwd: ROOT_DIR,
-    stdio: ['ignore', 'inherit', 'pipe'],
-    env: { ...process.env, KITTEN_PORT: new URL(TTS_URL).port || '5005' },
-  });
+  const child = spawn(PYTHON, ['-u', ...args], { cwd: ROOT_DIR, stdio: ['ignore', 'inherit', 'pipe'], env: { ...process.env, ...env } });
   // Library warnings go to stderr; only surface lines that look like real errors.
   child.stderr.on('data', (d) => {
     const text = d.toString();
-    if (/error|traceback/i.test(text)) process.stderr.write(`[tts] ${text}`);
+    if (/error|traceback/i.test(text)) process.stderr.write(`[${name}] ${text}`);
   });
-  child.on('exit', (code) => code && console.error(`[tts] exited with code ${code}`));
-  const stop = () => child.kill();
-  process.on('exit', stop);
-  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => process.exit());
+  child.on('exit', (code) => code && console.error(`[${name}] exited with code ${code}`));
+  children.push(child);
 }
-startTtsService();
+
+startPythonService({ name: 'tts', args: ['tts_server.py'], healthUrl: `${TTS_URL}/health`, env: { KITTEN_PORT: new URL(TTS_URL).port || '5005' } });
+startPythonService({ name: 'ncert', args: ['-m', 'ncert.server'], healthUrl: `${NCERT_URL}/health`, env: { NCERT_PORT: new URL(NCERT_URL).port || '5006' } });

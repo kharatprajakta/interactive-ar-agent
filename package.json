@@ -2,7 +2,7 @@
   "name": "interactive-ar-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "Talk to an AI companion in augmented reality, right in the browser (three.js + WebXR + Ollama).",
+  "description": "Hands-free video calls with AI personalities in their own 3D rooms (three.js, Ollama, KittenTTS, RAG).",
   "type": "module",
   "scripts": {
     "start": "node server.js",
