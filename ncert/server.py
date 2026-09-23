@@ -37,7 +37,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "chunks": store.collection().count()})
+            self._json(200, {"ok": True, "chunks": store.total_chunks()})
         elif self.path == "/catalog":
             self._json(200, cached_catalog())
         else:
@@ -66,5 +66,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"[ncert] {store.collection().count()} chunks indexed; ready on http://{HOST}:{PORT}", flush=True)
+    print(f"[ncert] {store.total_chunks()} chunks indexed; ready on http://{HOST}:{PORT}", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

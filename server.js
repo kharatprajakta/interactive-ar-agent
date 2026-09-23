@@ -120,6 +120,16 @@ async function ncertHealth() {
   }
 }
 
+/** The indexed NCERT textbooks: { "10": { "science": [{ chapter, title }] } }, or {} if none. */
+async function handleBooks(res) {
+  try {
+    const r = await fetch(`${NCERT_URL}/catalog`, { signal: AbortSignal.timeout(5000) });
+    sendJson(res, 200, { ok: r.ok, catalog: r.ok ? await r.json() : {} });
+  } catch {
+    sendJson(res, 200, { ok: false, catalog: {} });
+  }
+}
+
 async function handleHealth(res) {
   const [tts, ncert] = await Promise.all([ttsHealth(), ncertHealth()]);
   let names = [];
@@ -264,6 +274,7 @@ async function handler(req, res) {
     if (pathname === '/api/tts' && req.method === 'POST') return await handleTts(req, res);
     if (pathname === '/api/stt' && req.method === 'POST') return await handleStt(req, res);
     if (pathname === '/api/health' && req.method === 'GET') return await handleHealth(res);
+    if (pathname === '/api/books' && req.method === 'GET') return await handleBooks(res);
     if (req.method === 'GET' || req.method === 'HEAD') return await serveStatic(req, res);
     sendText(res, 405, 'Method not allowed');
   } catch (err) {

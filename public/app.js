@@ -8,6 +8,7 @@ const PHONE_ICON =
 
 let personas = [];
 let health = null;
+let books = {}; // indexed NCERT textbooks: { "10": { "science": [{ chapter, title }] } }
 let portraits = {};
 let stage = null;
 let call = null; // the active call's state
@@ -144,12 +145,14 @@ function switchListener(next, note) {
 // Landing page
 // ===========================================================================
 async function init() {
-  const [p, h] = await Promise.all([
+  const [p, h, b] = await Promise.all([
     fetch('/api/personas').then((r) => r.json()),
     fetch('/api/health').then((r) => r.json()).catch(() => null),
+    fetch('/api/books').then((r) => r.json()).catch(() => null),
   ]);
   personas = p.personas;
   health = h;
+  books = sortBooks(b?.catalog || {});
   renderContacts();
   showNotices();
   portraits = await renderPortraits(personas);
@@ -178,6 +181,7 @@ function renderContacts() {
       li.querySelector('.card-name').textContent = p.name;
       li.querySelector('.card-role').textContent = p.role;
       li.querySelector('.card-tag').textContent = p.tagline;
+      if (p.ncert) li.querySelector('.card-tag').after(libraryLine());
       li.querySelector('.call-btn span').textContent = `Call ${p.name}`;
       li.querySelector('.call-btn').addEventListener('click', () => startCall(p));
       return li;
@@ -198,6 +202,97 @@ function showNotices() {
   else if (!localAvailable()) notes.push("Hands-free voice is using your browser's online speech service. Start the Python voice service for private, on-device recognition.");
   $('notice').hidden = !notes.length;
   $('notice').innerHTML = notes.map((n) => `<div>${n.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c])}</div>`).join('');
+}
+
+// ===========================================================================
+// NCERT bookshelf (Kiki)
+// ===========================================================================
+const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\b(And|Of|The|Without)\b/g, (w) => w.toLowerCase());
+
+/** "english first flight" -> "English: First Flight", "political science" -> "Political Science" */
+function bookLabel(subject) {
+  const m = subject.match(/^(english|hindi|sanskrit) (.+)$/);
+  return m ? `${titleCase(m[1])}: ${titleCase(m[2])}` : titleCase(subject);
+}
+
+const SUBJECT_ORDER = ['science', 'maths', 'physics', 'chemistry', 'biology', 'history', 'geography', 'political science', 'economics', 'english'];
+
+/** Classes in number order; subjects core-first (science, maths, social science, english), then A-Z. */
+function sortBooks(catalog) {
+  const rank = (s) => {
+    const i = SUBJECT_ORDER.findIndex((o) => s === o || s.startsWith(`${o} `));
+    return i < 0 ? SUBJECT_ORDER.length : i;
+  };
+  return Object.fromEntries(
+    Object.entries(catalog)
+      .sort(([a], [b]) => a - b)
+      .map(([cls, subjects]) => [cls, Object.fromEntries(Object.entries(subjects).sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)))]),
+  );
+}
+
+/** "📚 Class 10 · Science, Maths, History +7" under Kiki's card. */
+function libraryLine() {
+  const el = document.createElement('p');
+  el.className = 'card-books';
+  const classes = Object.entries(books);
+  if (!classes.length) {
+    el.textContent = '📚 No textbooks loaded yet';
+    return el;
+  }
+  el.textContent = classes
+    .map(([cls, subjects]) => {
+      const names = Object.keys(subjects).map(bookLabel);
+      return `Class ${cls} · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3} more` : ''}`;
+    })
+    .join('  |  ');
+  el.prepend('📚 ');
+  el.title = classes.map(([cls, s]) => `Class ${cls}: ${Object.keys(s).map(bookLabel).join(', ')}`).join('\n');
+  return el;
+}
+
+function renderShelf() {
+  const list = $('shelf-list');
+  list.replaceChildren();
+  for (const [cls, subjects] of Object.entries(books)) {
+    const head = document.createElement('h3');
+    head.textContent = `Class ${cls}`;
+    list.append(head);
+    for (const [subject, chapters] of Object.entries(subjects)) {
+      const book = document.createElement('details');
+      book.className = 'book';
+      book.innerHTML = `<summary><span class="book-name"></span><span class="book-count"></span></summary><button class="book-open"></button><ol class="chapters"></ol>`;
+      const name = bookLabel(subject);
+      book.querySelector('.book-name').textContent = name;
+      book.querySelector('.book-count').textContent = `${chapters.length} ch`;
+      const open = book.querySelector('.book-open');
+      open.textContent = `Study ${name}`;
+      open.addEventListener('click', () => pickBook(`I'm in Class ${cls}. Let's study ${name}.`));
+      const ol = book.querySelector('.chapters');
+      for (const c of chapters) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.innerHTML = '<b></b><span></span>';
+        btn.firstChild.textContent = c.chapter;
+        btn.lastChild.textContent = c.title;
+        btn.addEventListener('click', () => pickBook(`I'm in Class ${cls}. Let's study ${name}, Chapter ${c.chapter}: ${c.title}.`));
+        li.append(btn);
+        ol.append(li);
+      }
+      list.append(book);
+    }
+  }
+}
+
+/** Say the choice to Kiki as if the student had spoken it; she confirms, then opens the book. */
+function pickBook(text) {
+  openShelf(false);
+  ask(text);
+}
+
+function openShelf(open) {
+  if (open) openDrawer(false);
+  $('shelf').hidden = !open;
+  $('btn-books').setAttribute('aria-pressed', String(open));
 }
 
 // ===========================================================================
@@ -251,6 +346,9 @@ async function startCall(p) {
   $('hint').hidden = true;
   $('drawer').hidden = true;
   $('btn-chat').setAttribute('aria-pressed', 'false');
+  openShelf(false);
+  $('btn-books').hidden = !(p.ncert && Object.keys(books).length);
+  if (p.ncert) renderShelf();
   setStatus('Connecting…', 'idle');
 
   const ringing = $('ringing');
@@ -461,7 +559,7 @@ async function ask(text) {
           addMsg('system', `Added “${ev.doc.title}” to shared documents.`);
         } else if (ev.type === 'study') {
           const chip = $('study-chip');
-          chip.textContent = `Class ${ev.class_num} · ${ev.subject}${ev.chapter ? ` · Ch ${ev.chapter}: ${ev.chapter_title}` : ''}`;
+          chip.textContent = `📖 Class ${ev.class_num} · ${bookLabel(ev.subject)}${ev.chapter ? ` · Ch ${ev.chapter}: ${ev.chapter_title}` : ''}`;
           chip.hidden = false;
         } else if (ev.type === 'error') {
           throw new Error(ev.text);
@@ -526,6 +624,7 @@ async function setCamera(on) {
 }
 
 function openDrawer(open) {
+  if (open) openShelf(false);
   $('drawer').hidden = !open;
   $('btn-chat').setAttribute('aria-pressed', String(open));
   if (open) {
@@ -577,6 +676,9 @@ for (const id of ['stage', 'call-status']) {
 $('btn-cam').addEventListener('click', () => setCamera($('selfview').hidden));
 $('btn-chat').addEventListener('click', () => openDrawer($('drawer').hidden));
 $('btn-drawer-close').addEventListener('click', () => openDrawer(false));
+$('btn-books').addEventListener('click', () => openShelf($('shelf').hidden));
+$('btn-shelf-close').addEventListener('click', () => openShelf(false));
+$('study-chip').addEventListener('click', () => openShelf(true));
 $('btn-end').addEventListener('click', endCall);
 $('btn-cancel').addEventListener('click', endCall);
 $('btn-attach').addEventListener('click', () => $('file-input').click());
@@ -631,6 +733,7 @@ for (const el of document.querySelectorAll('.call-ui > *')) {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('drawer').hidden) openDrawer(false);
+  if (e.key === 'Escape' && !$('shelf').hidden) openShelf(false);
 });
 
 init();

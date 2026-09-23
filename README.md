@@ -61,10 +61,13 @@ Kiki answers only from textbooks you've indexed into the local ChromaDB (`data/c
 
 NCERT names chapter PDFs `<book code><chapter>.pdf` (e.g. `jesc101.pdf` is Class 10 Science, chapter 1). If `download` can't reach ncert.nic.in, get the book's zip from https://ncert.nic.in/textbook.php in your browser, unzip it, and use `folder`. The prelims, answers and appendix files are skipped automatically. Restart `npm start` after indexing, or wait a minute for the catalogue to refresh.
 
+Each textbook is stored in its own ChromaDB collection (e.g. `ncert_c10_science`). All ten English-medium Class 10 books are supported: `jesc1 jemh1 jess1 jess2 jess3 jess4 jeff1 jefp1 jewe2 jehp1`. Hindi and Sanskrit books are left out because their PDFs use legacy fonts or scanned pages.
+
 **How Kiki works:**
 1. On every turn, a structured extraction step works out your **class**, **subject**, **chapter** and **topic** from the conversation. The class must come from you, never a guess.
-2. If anything is missing, she asks for it. Once she knows, she confirms it ("Class 10 Science, got it!"), and a chip appears on the call screen.
-3. She searches only that book's chunks (a ChromaDB metadata filter) and answers from the excerpts, citing the chapter and page. If the book doesn't cover your question, she says so.
+2. If anything is missing, she asks for it. Before teaching, she repeats the book back ("Class 10 Science, is that right?") and waits for your yes. If you correct her, she confirms the new choice instead.
+3. After you confirm, she opens only that book's collection. She searches the chapter you named, or finds the single best-matching chapter and stays inside it, then answers from those excerpts and cites the chapter and page. If the book doesn't cover your question, she says so.
+4. In a call with Kiki, the **Books** button (or the 📖 chip) opens a bookshelf. Tap a book or chapter to pick it without speaking.
 
 ## Using it on your phone
 

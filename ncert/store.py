@@ -1,7 +1,8 @@
 """NCERT textbook store: PDF pages -> chunks -> Ollama embeddings -> ChromaDB.
 
-Every chunk carries metadata (class_num, subject, book, chapter, chapter_title,
-page) so answers can be restricted to the student's own textbook.
+Each textbook gets its own collection (e.g. "ncert_c10_science"), so a search
+only ever touches the one book the student confirmed. Chunks also carry
+metadata (chapter, chapter_title, page) to narrow it to a chapter.
 """
 from __future__ import annotations
 
@@ -17,20 +18,49 @@ ROOT = Path(__file__).resolve().parent.parent
 DB_DIR = Path(os.environ.get("NCERT_DB", ROOT / "data" / "chroma"))
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
-COLLECTION = "ncert"
+PREFIX = "ncert_"
 CHUNK_CHARS = 1000
 CHUNK_OVERLAP = 150
 
 _client = None
 
 
-def collection():
+def client():
     global _client
     if _client is None:
         DB_DIR.mkdir(parents=True, exist_ok=True)
         _client = chromadb.PersistentClient(path=str(DB_DIR))
-    # Embeddings come from Ollama, so Chroma's default embedder is disabled.
-    return _client.get_or_create_collection(COLLECTION, embedding_function=None, metadata={"hnsw:space": "cosine"})
+    return _client
+
+
+def collection_name(class_num: int, subject: str) -> str:
+    return f"{PREFIX}c{class_num}_" + re.sub(r"[^a-z0-9]+", "_", subject.lower()).strip("_")
+
+
+def book_collection(class_num: int, subject: str, book: str | None = None, create: bool = False):
+    """The collection holding one textbook, or None if it isn't indexed."""
+    name = collection_name(class_num, subject)
+    if create:
+        # Embeddings come from Ollama, so Chroma's default embedder is disabled.
+        return client().get_or_create_collection(
+            name, embedding_function=None,
+            metadata={"hnsw:space": "cosine", "class_num": class_num, "subject": subject, "book": book or ""},
+        )
+    try:
+        return client().get_collection(name, embedding_function=None)
+    except Exception:  # not indexed
+        return None
+
+
+def book_collections():
+    for c in client().list_collections():
+        name = getattr(c, "name", c)
+        if name.startswith(PREFIX):
+            yield client().get_collection(name, embedding_function=None)
+
+
+def total_chunks() -> int:
+    return sum(c.count() for c in book_collections())
 
 
 def embed(texts: list[str], kind: str = "document") -> list[list[float]]:
@@ -86,17 +116,37 @@ def guess_chapter_title(first_page: str, fallback: str) -> str:
     return fallback
 
 
-def index_pdf(path: Path, *, class_num: int, subject: str, book: str, chapter: int, chapter_title: str | None = None) -> int:
-    from pypdf import PdfReader
+def read_pages(path: Path) -> list[str]:
+    import dataclasses
 
-    reader = PdfReader(str(path))
-    pages = [clean_page(p.extract_text() or "") for p in reader.pages]
+    import pypdf
+    from pypdf.errors import LimitReachedError
+
+    def extract():
+        return [p.extract_text() or "" for p in pypdf.PdfReader(str(path)).pages]
+
+    try:
+        return extract()
+    except LimitReachedError:
+        # Some NCERT PDFs embed huge compressed streams that trip pypdf's
+        # zip-bomb guard. These are trusted files, so retry with higher limits.
+        limits = {
+            f.name: 500_000_000
+            for f in dataclasses.fields(pypdf.Configuration)
+            if f.name.endswith(("output_length", "buffer_size", "stream_length"))
+        }
+        with pypdf.apply_configuration(**limits):
+            return extract()
+
+
+def index_pdf(path: Path, *, class_num: int, subject: str, book: str, chapter: int, chapter_title: str | None = None) -> int:
+    pages = [clean_page(t) for t in read_pages(path)]
     if not any(pages):
         raise ValueError(f"{path.name}: no extractable text (scanned PDF?)")
     title = chapter_title or guess_chapter_title(pages[0], path.stem)
 
-    col = collection()
-    col.delete(where={"$and": [{"book": book}, {"chapter": chapter}]})  # re-indexing replaces
+    col = book_collection(class_num, subject, book, create=True)
+    col.delete(where={"chapter": chapter})  # re-indexing replaces
 
     ids, docs, metas = [], [], []
     for page_no, text in enumerate(pages, start=1):
@@ -115,16 +165,15 @@ def index_pdf(path: Path, *, class_num: int, subject: str, book: str, chapter: i
 
 def catalog() -> dict:
     """{ "10": { "science": [ {"chapter": 1, "title": "..."} ] } }"""
-    col = collection()
     result: dict = {}
-    total = col.count()
-    offset = 0
-    while offset < total:
-        batch = col.get(include=["metadatas"], limit=5000, offset=offset)
-        for m in batch["metadatas"]:
-            chapters = result.setdefault(str(m["class_num"]), {}).setdefault(m["subject"], {})
-            chapters.setdefault(m["chapter"], m["chapter_title"])
-        offset += 5000
+    for col in book_collections():
+        info = col.metadata or {}
+        chapters = result.setdefault(str(info["class_num"]), {}).setdefault(info["subject"], {})
+        total, offset = col.count(), 0
+        while offset < total:
+            for m in col.get(include=["metadatas"], limit=5000, offset=offset)["metadatas"]:
+                chapters.setdefault(m["chapter"], m["chapter_title"])
+            offset += 5000
     return {
         cls: {subj: [{"chapter": c, "title": t} for c, t in sorted(chs.items())] for subj, chs in subjects.items()}
         for cls, subjects in sorted(result.items(), key=lambda kv: int(kv[0]))
@@ -132,11 +181,14 @@ def catalog() -> dict:
 
 
 def search(query: str, class_num: int, subject: str, k: int = 5, chapter: int | None = None) -> list[dict]:
-    col = collection()
-    where = [{"class_num": class_num}, {"subject": subject}]
-    if chapter:
-        where.append({"chapter": chapter})
-    res = col.query(query_embeddings=embed([query], "query"), n_results=k, where={"$and": where}, include=["documents", "metadatas", "distances"])
+    """Search one textbook only, optionally just one of its chapters."""
+    col = book_collection(class_num, subject)
+    if col is None or not col.count():
+        return []
+    res = col.query(
+        query_embeddings=embed([query], "query"), n_results=min(k, col.count()),
+        where={"chapter": chapter} if chapter else None, include=["documents", "metadatas", "distances"],
+    )
     return [
         {**meta, "text": doc, "score": round(1 - dist, 3)}
         for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0])
