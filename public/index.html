@@ -19,16 +19,75 @@
     </script>
   </head>
   <body>
+    <!-- ================= Sign in / create account ================= -->
+    <main id="auth" class="auth" hidden>
+      <div class="auth-card">
+        <div class="brand">👋 Hello Crew</div>
+        <h1 id="auth-title">Welcome! Let's get you set up</h1>
+        <p id="auth-sub" class="auth-sub">Create an account so the crew can remember you: your name, how you like to talk, and what you're working on.</p>
+        <div class="auth-tabs" role="tablist">
+          <button type="button" id="tab-signup" role="tab" aria-selected="true">Create account</button>
+          <button type="button" id="tab-login" role="tab" aria-selected="false">Sign in</button>
+        </div>
+        <form id="auth-form" class="auth-form" novalidate>
+          <label id="name-field">
+            <span>What should we call you?</span>
+            <input id="auth-name" name="name" autocomplete="given-name" maxlength="40" placeholder="Your name" />
+          </label>
+          <label>
+            <span>Email</span>
+            <input id="auth-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="auth-password" name="password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required />
+          </label>
+          <label id="invite-field" hidden>
+            <span>Invite code</span>
+            <input id="auth-invite" name="invite" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="From whoever shared this link" />
+          </label>
+          <p id="auth-error" class="auth-error" role="alert" hidden></p>
+          <button id="auth-submit" class="auth-submit" type="submit">Create account</button>
+        </form>
+      </div>
+    </main>
+
     <!-- ================= Landing: who do you want to call? ================= -->
-    <main id="home" class="home">
+    <main id="home" class="home" hidden>
       <header class="home-head">
-        <h1>Hello Crew</h1>
-        <p>Your AI friends, each with their own room, voice and speciality. Tap to start a hands-free video call.</p>
+        <div class="home-top">
+          <div class="brand">👋 Hello Crew</div>
+          <div class="account">
+            <button id="btn-memory" class="account-btn" title="What the crew remembers about you">🧠 <span>Memory</span></button>
+            <button id="btn-logout" class="account-btn" title="Sign out">Sign out</button>
+          </div>
+        </div>
+        <h1 id="hello">Hi there! Who would you like to talk to?</h1>
+        <p>Eight friendly helpers, each in their own little world. Pick one and just talk, like a video call. No typing needed.</p>
+        <ol class="steps" aria-label="How it works">
+          <li><span>📞</span> Tap <b>Call</b></li>
+          <li><span>🎙️</span> Allow the mic</li>
+          <li><span>💬</span> Just talk. Tap the screen to interrupt</li>
+        </ol>
       </header>
       <div id="notice" class="notice" hidden></div>
       <ul id="contacts" class="contacts" aria-label="People you can call"></ul>
+      <!-- What the crew remembers about you -->
+      <dialog id="memory" class="memory">
+        <form method="dialog" class="memory-head">
+          <strong>🧠 What the crew remembers</strong>
+          <button class="icon-btn" aria-label="Close">✕</button>
+        </form>
+        <p class="memory-sub">Everyone on the crew shares this, so you don't have to repeat yourself. It's saved on this machine, and you can remove anything.</p>
+        <div id="memory-body" class="memory-body"></div>
+        <div class="memory-foot">
+          <button id="btn-erase" class="danger-btn" type="button">Erase all my memory</button>
+        </div>
+      </dialog>
+
       <footer class="home-foot">
-        Runs locally with Ollama. Characters and rooms by <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0).
+        🔒 The AI, the voices and speech recognition run on your own machine. Only web searches go online.
+        <br />Characters and rooms by <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0).
       </footer>
     </main>
 

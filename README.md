@@ -18,14 +18,14 @@ Pick someone from the contact list and call them. Each character lives in their 
 - **Live captions, a call timer, and an optional self-view camera.**
 - **Web search.** A small "router" step decides when a question needs current information (weather, news, prices…). The character then searches DuckDuckGo, reads the top pages, and cites them.
 - **Your documents (RAG).** Upload a PDF or text file, or paste a link, from the chat drawer. The server embeds it with `nomic-embed-text`, and every character can answer from it.
-- **Memory.** Each character remembers your recent conversation in this browser.
+- **Accounts and memory.** Sign up with your name, email and password, and the crew remembers *you* on any device. Each character keeps your chat history with them. The whole crew shares a small profile: how you like to talk (e.g. Hinglish, short answers), key facts you've mentioned (city, diet, job, goals…), and Kiki's study progress, so she can pick up where you left off. A background step updates the profile after each reply. **🧠 Memory** on the home page shows everything they remember; you can forget any item or erase it all. Everything is stored locally in `data/hellocrew.db` (SQLite). Passwords are scrypt-hashed, and logins use an HttpOnly session cookie.
 - **AR.** On Android Chrome with ARCore, the **AR** button brings the character into your real room.
 
 Everything runs locally: [Ollama](https://ollama.com) for the chat model and embeddings, [Kokoro-82M](https://github.com/thewh1teagle/kokoro-onnx) for the voices (with [KittenTTS](https://github.com/KittenML/KittenTTS) as a fallback), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for speech recognition, and [ChromaDB](https://www.trychroma.com) for the textbooks. Characters and rooms are [Kenney](https://kenney.nl) assets (CC0).
 
 ## Setup
 
-1. Install [Node.js 18+](https://nodejs.org), [Ollama](https://ollama.com/download), and **Python 3.12 or older** (KittenTTS doesn't support 3.13 yet).
+1. Install [Node.js 22.13+](https://nodejs.org) (for its built-in SQLite), [Ollama](https://ollama.com/download), and **Python 3.12 or older** (KittenTTS doesn't support 3.13 yet).
 2. Pull the models:
    ```sh
    ollama pull qwen3.5:4b
@@ -77,7 +77,13 @@ The mic, camera and AR need **HTTPS** (or `localhost`). Pick one:
 - **USB (Android):** run `adb reverse tcp:3000 tcp:3000`, then open `http://localhost:3000` in Chrome on the phone.
 - **Your own certificate:** `SSL_KEY=key.pem SSL_CERT=cert.pem npm start`.
 
-Anyone with a tunnel link can use your PC's AI, so only share it with people you trust. Links shared into the app can't reach private or local network addresses.
+**Before sharing a link, set an invite code.** Otherwise anyone who finds the URL can create an account and use your machine. Put it in a `.env` file in the project folder (gitignored; `npm start` loads it):
+
+```sh
+INVITE_CODE=crew-some-secret-words-123     # several codes: separate with commas
+```
+
+Restart the server, and new sign-ups must enter the code. Existing users sign in as usual. Remove a code and restart to stop new sign-ups with it. Links shared into the app can't reach private or local network addresses.
 
 ## Configuration
 
@@ -94,13 +100,18 @@ Anyone with a tunnel link can use your PC's AI, so only share it with people you
 | `TTS_URL` / `NCERT_URL` | `:5005` / `:5006` | Where the Python helpers listen |
 | `TTS_AUTOSTART` / `NCERT_AUTOSTART` | on | Set to `0` to run a helper yourself |
 | `NCERT_DB` | `data/chroma` | ChromaDB folder for the textbooks |
+| `DB_PATH` | `data/hellocrew.db` | SQLite file for accounts and memory |
+| `INVITE_CODE` | none (open sign-up) | Code(s) needed to create an account, comma-separated. Set this before sharing a link |
 | `DEBUG_CHAT` | off | Log Kiki's extracted study context |
 | `SSL_KEY` / `SSL_CERT` | none | Serve HTTPS directly |
 
 ## How it fits together
 
 ```
-server.js            Static files, /api/chat (NDJSON events), /api/docs, /api/tts; starts the Python helpers
+server.js            Static files, accounts (/api/auth), /api/chat (NDJSON events), /api/call, /api/memory, /api/docs, /api/tts; starts the Python helpers
+lib/db.js            SQLite schema: users, sessions, messages, memory
+lib/auth.js          Sign up / sign in (scrypt), session cookies, login rate limiting
+lib/memory.js        Per-user chat history, the shared profile (language, style, facts, study), learning from each turn, greetings
 lib/personas.js      The eight characters: voice, model, room, prompt
 lib/chat.js          One turn: links, then documents, then the NCERT textbook or a web-search decision, then a streamed reply
 lib/web.js           DuckDuckGo search, safe page fetching (private-network guard), HTML to text

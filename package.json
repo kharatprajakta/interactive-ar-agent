@@ -5,10 +5,10 @@
   "description": "Hands-free video calls with AI personalities in their own 3D rooms (three.js, Ollama, KittenTTS, RAG).",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --env-file-if-exists=.env --watch server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13"
   }
 }
