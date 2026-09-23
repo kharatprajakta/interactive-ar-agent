@@ -1,0 +1,3 @@
+# NCERT textbook service image (ncert/): ChromaDB vector store + PDF ingestion.
+chromadb>=1.0,<2
+pypdf>=5.0,<7

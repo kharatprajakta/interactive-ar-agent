@@ -1,0 +1,9 @@
+# Shell scripts run inside Linux containers: keep LF line endings on every OS.
+*.sh text eol=lf
+# Compose/YAML and Dockerfiles are read by Docker in Linux too.
+*.yaml text eol=lf
+*.yml text eol=lf
+*Dockerfile text eol=lf
+# Binary assets
+*.glb binary
+*.png binary

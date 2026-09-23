@@ -1,0 +1,30 @@
+# Production overrides: run released images from GHCR instead of building, and
+# publish nothing but what's needed. Use with the base file:
+#   docker compose -f compose.yaml -f deploy/compose.prod.yaml --env-file deploy/production.env --profile public up -d
+# Copyright (c) 2026 PacificAI. All rights reserved.
+services:
+  postgres:
+    ports: !reset [] # no host access to the database in production
+
+  app:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/hello-crew-app:${RELEASE_TAG:-latest}
+    pull_policy: always
+
+  admin:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/hello-crew-app:${RELEASE_TAG:-latest}
+    pull_policy: always
+
+  voice:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/hello-crew-voice:${RELEASE_TAG:-latest}
+    pull_policy: always
+
+  ncert:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/hello-crew-ncert:${RELEASE_TAG:-latest}
+    pull_policy: always
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:?Pin OLLAMA_VERSION in production}

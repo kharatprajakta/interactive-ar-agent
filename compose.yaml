@@ -1,0 +1,222 @@
+# Hello Crew: the whole stack, always running.
+#   docker compose up -d --build          # local (this file only)
+#   docker compose -f compose.yaml -f deploy/compose.prod.yaml --profile public up -d   # production
+# Settings come from .env (copy .env.example). See docs/DEPLOYMENT.md.
+# Copyright (c) 2026 PacificAI. All rights reserved.
+name: hellocrew
+
+x-common: &common
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: '3' } # logs can't fill the disk
+
+x-db-url: &db-url postgres://${POSTGRES_USER:-hellocrew}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-hellocrew}
+
+services:
+  # ---------------------------------------------------------------- data
+  postgres:
+    container_name: hellocrew-postgres
+    <<: *common
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hellocrew}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hellocrew}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Local only: reachable from this machine for DB tools, never from the network.
+    ports:
+      - 127.0.0.1:${POSTGRES_PORT:-5433}:5432
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Nightly pg_dump into ./backups (on the host, outside Docker), oldest pruned.
+  db-backup:
+    container_name: hellocrew-db-backup
+    <<: *common
+    image: postgres:17-alpine
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-hellocrew}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-hellocrew}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./deploy/scripts/backup-loop.sh:/backup-loop.sh:ro
+    entrypoint: [sh, /backup-loop.sh]
+
+  # ---------------------------------------------------------------- models
+  ollama:
+    container_name: hellocrew-ollama
+    <<: *common
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, ollama, list]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # One-shot: make sure the chat + embedding models are present (instant if they are).
+  ollama-pull:
+    container_name: hellocrew-ollama-pull
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    restart: 'no'
+    depends_on:
+      ollama: { condition: service_healthy }
+    entrypoint: [sh, -c, 'ollama pull "$$CHAT" && ollama pull "$$EMBED"']
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHAT: ${OLLAMA_MODEL:-qwen3.5:4b}
+      EMBED: ${EMBED_MODEL:-nomic-embed-text}
+
+  voice:
+    container_name: hellocrew-voice
+    <<: *common
+    build: { context: ., dockerfile: docker/python.Dockerfile, target: voice }
+    image: hellocrew/voice:local
+    environment:
+      TTS_ENGINE: ${TTS_ENGINE:-kokoro}
+      STT_MODEL: ${STT_MODEL:-base.en}
+      STT_DEVICE: cpu # keeps the GPU for the chat model
+    volumes:
+      - voice-kokoro:/app/data/kokoro
+      - voice-hf:/app/data/hf
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5005/health', timeout=4)"]
+      interval: 20s
+      timeout: 6s
+      retries: 5
+      start_period: 180s # first run downloads Kokoro + Whisper
+
+  ncert:
+    container_name: hellocrew-ncert
+    <<: *common
+    build: { context: ., dockerfile: docker/python.Dockerfile, target: ncert }
+    image: hellocrew/ncert:local
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+    volumes:
+      - ncert-chroma:/app/data/chroma
+      - ncert-pdfs:/app/data/ncert_pdfs
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5006/health', timeout=4)"]
+      interval: 20s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------- apps
+  app:
+    container_name: hellocrew-app
+    <<: *common
+    build: { context: ., dockerfile: docker/node.Dockerfile }
+    image: hellocrew/app:local
+    depends_on:
+      postgres: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+      voice: { condition: service_started }
+      ncert: { condition: service_started }
+    environment:
+      PORT: 3000
+      DATABASE_URL: *db-url
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      TTS_URL: http://voice:5005
+      NCERT_URL: http://ncert:5006
+      TTS_AUTOSTART: '0'
+      NCERT_AUTOSTART: '0'
+      INVITE_CODE: ${INVITE_CODE:-}
+    # Published on localhost only; the public HTTPS tunnel (Tailscale) points here.
+    ports:
+      - 127.0.0.1:${APP_PORT:-3000}:3000
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  admin:
+    container_name: hellocrew-admin
+    <<: *common
+    build: { context: ., dockerfile: docker/node.Dockerfile } # same image as app
+    image: hellocrew/app:local
+    command: [node, admin/server.js]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_PORT: 3001
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      DATABASE_URL: *db-url
+    # Operators only: never expose this through the tunnel.
+    ports:
+      - 127.0.0.1:${ADMIN_PORT:-3001}:3001
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------- public access (optional)
+  # Tailscale Funnel as a container: https://<TS_HOSTNAME>.<tailnet>.ts.net -> app.
+  # Enable with `--profile public` and a TS_AUTHKEY (production). Locally you can
+  # instead run `tailscale funnel --bg 3000` on the host.
+  tailscale:
+    container_name: hellocrew-tailscale
+    <<: *common
+    image: tailscale/tailscale:stable
+    profiles: [public]
+    hostname: ${TS_HOSTNAME:-hello-crew}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: 'true'
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./deploy/tailscale:/config:ro
+    depends_on:
+      app: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  ollama:
+  voice-kokoro:
+  voice-hf:
+  ncert-chroma:
+  ncert-pdfs:
+  tailscale-state:
