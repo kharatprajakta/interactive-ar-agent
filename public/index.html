@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Nova AR Agent</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <video id="camera" playsinline muted></video>
+    <div id="stage"></div>
+
+    <!-- Everything inside #ui stays visible inside the WebXR session (DOM overlay). -->
+    <div id="ui">
+      <header class="topbar interactive">
+        <div class="brand">Nova</div>
+        <div id="status" class="status" data-state="idle">Idle</div>
+        <div class="actions">
+          <select id="voice-select" class="chip" aria-label="Voice" hidden></select>
+          <button id="btn-ar" class="chip" hidden>Enter AR</button>
+          <button id="btn-mute" class="chip" aria-pressed="false">Voice on</button>
+        </div>
+      </header>
+
+      <div id="hint" class="hint" hidden></div>
+
+      <section class="chat interactive">
+        <div id="log" class="log" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <button type="button" id="btn-mic" class="mic" aria-label="Hold a conversation by voice">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
+            </svg>
+          </button>
+          <input id="text" type="text" autocomplete="off" placeholder="Type or tap the mic…" />
+          <button type="submit" class="send">Send</button>
+        </form>
+      </section>
+
+      <div id="start" class="start">
+        <div class="card">
+          <h1>Meet Nova</h1>
+          <p>Your AI companion in augmented reality. Allow camera and microphone access, then talk or type.</p>
+          <button id="btn-start" class="primary">Start</button>
+          <p class="note">Runs on a local Ollama model. On Android Chrome with ARCore you can place Nova in your room.</p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

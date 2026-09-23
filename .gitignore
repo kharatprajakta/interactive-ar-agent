@@ -1,0 +1,29 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Python (KittenTTS service)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Generated audio
+*.wav
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.venv/

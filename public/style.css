@@ -1,0 +1,228 @@
+:root {
+  --panel: rgba(14, 17, 26, 0.62);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --text: #f3f5fa;
+  --muted: #a9b0c2;
+  --accent: #4f7cff;
+  --user: #4f7cff;
+  --listening: #2ee59d;
+  --thinking: #ffb020;
+  --speaking: #5ad8ff;
+  --error: #ff6b6b;
+  --gutter: 16px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: radial-gradient(ellipse at 50% 30%, #2a3350 0%, #11141d 70%);
+}
+
+/* Camera feed sits behind the transparent three.js canvas. */
+#camera {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+}
+body.has-camera #camera { display: block; }
+#camera.mirror { transform: scaleX(-1); }
+
+#stage, #stage canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: calc(env(safe-area-inset-top) + 12px) var(--gutter) calc(env(safe-area-inset-bottom) + 12px);
+}
+.interactive, .start { pointer-events: auto; }
+
+/* Top bar */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand { font-weight: 700; font-size: 18px; letter-spacing: 0.02em; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.actions { margin-left: auto; display: flex; gap: 8px; }
+
+.status {
+  font-size: 13px;
+  padding: 4px 10px 4px 22px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(10px);
+  position: relative;
+}
+.status::before {
+  content: '';
+  position: absolute;
+  left: 9px; top: 50%;
+  width: 7px; height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.status[data-state='listening']::before { background: var(--listening); animation: pulse 1s infinite; }
+.status[data-state='thinking']::before { background: var(--thinking); animation: pulse .6s infinite; }
+.status[data-state='speaking']::before { background: var(--speaking); }
+
+@keyframes pulse { 50% { opacity: .3; } }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+
+.chip {
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.chip[aria-pressed='true'] { color: var(--muted); }
+select.chip { color: var(--text); appearance: none; padding-right: 12px; }
+select.chip option { background: #1a1e2b; }
+
+.hint {
+  align-self: center;
+  margin-top: 12px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  font-size: 14px;
+  text-align: center;
+  max-width: 320px;
+}
+
+/* Chat panel */
+.chat {
+  width: 100%;
+  max-width: 440px;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+@media (min-width: 900px) {
+  .chat { align-self: flex-end; }
+}
+
+.log {
+  max-height: 32vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+}
+.log:empty { display: none; }
+
+.msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 15px;
+  line-height: 1.4;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(10px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg.user { align-self: flex-end; background: rgba(79, 124, 255, 0.75); border-color: transparent; }
+.msg.agent { align-self: flex-start; }
+.msg.system { align-self: center; font-size: 13px; color: var(--muted); text-align: center; }
+.msg.error { color: var(--error); }
+.msg.pending::after { content: '…'; animation: pulse .8s infinite; }
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(12px);
+}
+.composer input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+.composer input::placeholder { color: var(--muted); }
+
+.mic, .send {
+  border: 0;
+  border-radius: 999px;
+  height: 42px;
+}
+.mic {
+  width: 42px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  flex: none;
+}
+.mic.active { background: var(--listening); color: #062; animation: ring 1.2s infinite; }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(46,229,157,.6); } 100% { box-shadow: 0 0 0 14px rgba(46,229,157,0); } }
+.send { padding: 0 16px; background: rgba(255,255,255,.12); }
+
+/* Start screen */
+.start {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--gutter);
+  background: rgba(8, 10, 16, 0.55);
+  backdrop-filter: blur(6px);
+}
+.start[hidden] { display: none; }
+.card {
+  max-width: 380px;
+  text-align: center;
+  padding: 28px 24px;
+  border-radius: 20px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+}
+.card h1 { margin: 0 0 8px; font-size: 28px; }
+.card p { color: var(--muted); line-height: 1.5; margin: 0 0 20px; }
+.card .note { font-size: 12px; margin: 16px 0 0; }
+.primary {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 36px;
+  font-size: 17px;
+  font-weight: 600;
+  background: var(--accent);
+}
+
+/* In AR the camera feed comes from WebXR, not the <video>. */
+body.in-ar { background: transparent; }
+body.in-ar #camera { display: none; }

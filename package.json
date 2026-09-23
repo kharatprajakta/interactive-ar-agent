@@ -1,0 +1,14 @@
+{
+  "name": "interactive-ar-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Talk to an AI companion in augmented reality, right in the browser (three.js + WebXR + Ollama).",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
