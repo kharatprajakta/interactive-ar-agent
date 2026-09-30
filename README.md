@@ -1,4 +1,61 @@
-# Hello Crew: hands-free video calls with AI personalities
+<div align="center">
+
+<img src="docs/images/banner.svg" alt="Hello Crew: eight AI companions, each in their own 3D room" width="880">
+
+### Hands-free video calls with AI companions that live in their own 3D rooms
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-6c8cff?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/yashgadbail/interactive-ar-agent/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/yashgadbail/interactive-ar-agent/actions/workflows/ci.yml)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A5%2022.13-3fb6ff?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Python](https://img.shields.io/badge/Python-%E2%89%A4%203.12-f5a524?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2bb673?style=flat-square&logo=docker&logoColor=white)](compose.yaml)
+[![Models](https://img.shields.io/badge/Models-100%25%20local-ff5d8f?style=flat-square)](https://ollama.com)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-9b6bff?style=flat-square)](#contributing)
+
+**The open source answer to closed AI companions.**
+
+Grok's companions from [xAI](https://x.ai) and ChatGPT's voice mode from [OpenAI](https://openai.com) are the
+closest commercial equivalents: a character with a voice and a personality that you simply talk to. Hello Crew
+is that idea, rebuilt in the open. The chat model, the voices and the speech recognition all run on your own
+machine, the eight characters are defined in one file you can edit, and every line of it is MIT licensed.
+
+</div>
+
+---
+
+## Contents
+
+- [Why Hello Crew](#why-hello-crew)
+- [Meet the crew](#meet-the-crew)
+- [What every call includes](#what-every-call-includes)
+- [Quick start (Docker)](#quick-start-docker-recommended)
+- [Setup without Docker](#setup-without-docker-development)
+- [NCERT textbooks (for Kiki)](#ncert-textbooks-for-kiki)
+- [Using it on your phone](#using-it-on-your-phone)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Voices](#voices)
+- [Notes and known limits](#notes-and-known-limits)
+- [Contributing](#contributing)
+- [License](#license)
+- [Credits](#credits)
+
+## Why Hello Crew
+
+|  | Hello Crew | Closed companion apps |
+|---|---|---|
+| **Source code** | MIT. Fork it, change it, ship it | Proprietary |
+| **Where the model runs** | Your machine, through [Ollama](https://ollama.com) | The vendor's cloud |
+| **Speech recognition** | On device, faster-whisper | The vendor's cloud |
+| **Voices** | On device, 54 Kokoro voices | The vendor's cloud |
+| **Your conversations** | Your own PostgreSQL | The vendor's servers |
+| **Cost** | Free. No API keys, no quota | An account, usually paid |
+| **Characters** | Eight, each editable in `lib/personas.js` | Fixed by the vendor |
+| **A 3D room each** | Yes, furnished with [Kenney](https://kenney.nl) props (CC0) | Varies |
+| **Phone AR** | WebXR on Android Chrome | No |
+| **Works offline** | Yes, except web search | No |
+
+## Meet the crew
 
 Pick someone from the contact list and call them. Each character lives in their own 3D room with its own voice, personality and speciality. You talk to them hands-free, like a video call, and they potter about their space: Bruno heads to the stove while he thinks, and Hugo goes to his laptop to check a claim.
 
@@ -13,7 +70,8 @@ Pick someone from the contact list and call them. Each character lives in their 
 | **Kiki** | NCERT Tutor | Library | Confirms your class and subject, then teaches only from that NCERT textbook |
 | **Bella** | Travel Planner | Campsite | Trips, itineraries, hidden gems |
 
-**Every call includes:**
+## What every call includes
+
 - **Hands-free voice, on-device.** The mic stays open like a meeting. Silero voice-activity detection runs in the browser, and Whisper transcribes on your machine, so no cloud speech service is needed (the browser's Web Speech API is only a fallback). The mic pauses while the character talks; tap the screen to interrupt.
 - **Live captions, a call timer, and an optional self-view camera.**
 - **Web search.** A small "router" step decides when a question needs current information (weather, news, prices…). The character then searches DuckDuckGo, reads the top pages, and cites them.
@@ -77,6 +135,7 @@ NCERT names chapter PDFs `<book code><chapter>.pdf` (e.g. `jesc101.pdf` is Class
 Each textbook is stored in its own ChromaDB collection (e.g. `ncert_c10_science`). All ten English-medium Class 10 books are supported: `jesc1 jemh1 jess1 jess2 jess3 jess4 jeff1 jefp1 jewe2 jehp1`. Hindi and Sanskrit books are left out because their PDFs use legacy fonts or scanned pages.
 
 **How Kiki works:**
+
 1. On every turn, a structured extraction step works out your **class**, **subject**, **chapter** and **topic** from the conversation. The class must come from you, never a guess.
 2. If anything is missing, she asks for it. Before teaching, she repeats the book back ("Class 10 Science, is that right?") and waits for your yes. If you correct her, she confirms the new choice instead.
 3. After you confirm, she opens only that book's collection. She searches the chapter you named, or finds the single best-matching chapter and stays inside it, then answers from those excerpts and cites the chapter and page. If the book doesn't cover your question, she says so.
@@ -91,6 +150,7 @@ The mic, camera and AR need **HTTPS** (or `localhost`). Pick one:
 - **Your own certificate:** `SSL_KEY=key.pem SSL_CERT=cert.pem npm start`.
 
 **Control who can sign up before you share a link.** Otherwise anyone who finds the URL can create an account and use your machine. In the admin panel's **Invites** tab:
+
 - choose **Invite only**, **Open** or **Closed** (existing users can always sign in)
 - create codes with a label, a max number of people and an expiry, then copy them to share
 - disable or delete codes, and see who joined with each one
@@ -118,7 +178,63 @@ Changes apply immediately, with no restart. Any `INVITE_CODE` in `.env` is impor
 | `DEBUG_CHAT` | off | Log Kiki's extracted study context |
 | `SSL_KEY` / `SSL_CERT` | none | Serve HTTPS directly |
 
-## How it fits together
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph browser["Browser: Chrome or Edge"]
+    UI["3D room<br/>three.js + WebXR"]
+    MIC["Hands-free mic<br/>Silero VAD"]
+  end
+
+  subgraph backend["Node.js: server.js"]
+    CHAT["Turn pipeline<br/>lib/chat.js"]
+    MEM["Accounts + memory<br/>lib/auth.js, lib/memory.js"]
+    RAG["Web search + doc RAG<br/>lib/web.js, lib/rag.js"]
+  end
+
+  subgraph py["Python helpers"]
+    TTS["Kokoro TTS<br/>faster-whisper STT"]
+    NCERT["NCERT search<br/>ChromaDB"]
+  end
+
+  OLLAMA["Ollama<br/>qwen3.5:4b, nomic-embed-text"]
+  PG[("PostgreSQL")]
+  DDG["DuckDuckGo"]
+
+  UI <--> CHAT
+  MIC --> TTS
+  CHAT --> OLLAMA
+  CHAT --> RAG
+  CHAT --> NCERT
+  CHAT --> TTS
+  CHAT --> MEM
+  RAG --> DDG
+  MEM --> PG
+```
+
+**One turn of a call, end to end:**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant You
+  participant Browser
+  participant Server
+  participant Ollama
+  You->>Browser: Speak, the mic is always open
+  Browser->>Browser: Silero VAD finds the end of your speech
+  Browser->>Server: Audio to the voice service, Whisper transcribes it
+  Server-->>Browser: Transcript
+  Browser->>Server: /api/chat, streamed back as NDJSON
+  Server->>Server: Links, then documents, then NCERT or a web-search decision
+  Server->>Ollama: Persona, memory and context
+  Ollama-->>Server: Streamed reply
+  Server-->>Browser: Text events and Kokoro audio
+  Browser->>You: The character speaks and walks, captions appear
+```
+
+**The file map:**
 
 ```
 server.js            Static files, accounts (/api/auth), /api/chat (NDJSON events), /api/call, /api/memory, /api/docs, /api/tts; starts the Python helpers
@@ -144,12 +260,33 @@ public/voice.js      Speech out (KittenTTS/browser); hands-free speech in (local
 public/docs.js       PDF to text in the browser (pdf.js), document API calls
 ```
 
-**Voices:** each character has their own Kokoro voice: Bruno `am_fenrir`, Jasper `am_puck`, Hugo `bm_george`, Leo `am_michael`, Rosie `af_bella`, Luna `af_aoede`, Kiki `af_heart`, and Bella `bf_emma`. To change one, edit `KOKORO_VOICES` in `tts_server.py`. Kokoro has 54 voices, including Hindi (`hf_alpha`, `hm_omega`…), British, and more.
+## Voices
 
-**Notes:**
+Each character has their own Kokoro voice: Bruno `am_fenrir`, Jasper `am_puck`, Hugo `bm_george`, Leo `am_michael`, Rosie `af_bella`, Luna `af_aoede`, Kiki `af_heart`, and Bella `bf_emma`. To change one, edit `KOKORO_VOICES` in `tts_server.py`. Kokoro has 54 voices, including Hindi (`hf_alpha`, `hm_omega`…), British, and more.
+
+## Notes and known limits
+
 - With the Python voice service running, speech recognition happens on your machine. Without it, the app falls back to the browser's Web Speech API, which in Chrome and Edge sends audio to the vendor's cloud service. It doesn't work at all in Brave, Opera or some embedded browsers.
 - Windows: `tts_server.py` skips KittenTTS's unused `misaki`/spaCy import. That library's DLLs are blocked by Smart App Control. Kokoro runs on ONNX Runtime, which isn't blocked.
 
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request:
+
+```sh
+npm run check        # syntax-checks every JavaScript file, the same check CI runs
+```
+
+Adding a character is the easiest place to start. Give it an entry in `lib/personas.js` (name, role, voice, colour, prompt) and a room in `public/scenes.js`.
+
 ## License
 
-**Proprietary. © 2026 PacificAI. All rights reserved.** No use, copying, modification or distribution is allowed without PacificAI's written permission. See [LICENSE](LICENSE). Third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Use it, change it, ship it, sell it. Just keep the license file with it.
+Third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Credits
+
+Built by **Prajakta Kharat**. Have fun!
+
+Characters and rooms are [Kenney](https://kenney.nl) assets (CC0). The models and libraries that make the crew
+talk and listen are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

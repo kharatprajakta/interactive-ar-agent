@@ -2,7 +2,6 @@
 # Runs in the db-backup container: dump the database every BACKUP_INTERVAL_HOURS
 # into /backups (a host folder), and delete dumps older than BACKUP_KEEP_DAYS.
 # Restore: see docs/DEPLOYMENT.md ("Backups and restore").
-# Copyright (c) 2026 PacificAI. All rights reserved.
 set -eu
 interval_hours="${BACKUP_INTERVAL_HOURS:-24}"
 keep_days="${BACKUP_KEEP_DAYS:-14}"

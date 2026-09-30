@@ -1,7 +1,5 @@
 # Deploying Hello Crew
 
-> © 2026 PacificAI. All rights reserved. Internal document.
-
 Hello Crew runs as one Docker Compose stack. The same files serve a developer machine today and a production server later.
 
 ```

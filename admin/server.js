@@ -3,7 +3,6 @@
 // PostgreSQL database. Meant for operators only: it binds to localhost (and
 // in Docker is published on 127.0.0.1 only), never through the public tunnel.
 // Conversation text is deliberately not exposed here, only counts and memory.
-// Copyright (c) 2026 PacificAI. All rights reserved.
 import http from 'node:http';
 import { randomBytes, randomInt } from 'node:crypto';
 import { readFile } from 'node:fs/promises';

@@ -1,5 +1,4 @@
 // Syntax-check every JavaScript file (server, admin, browser modules). Used by CI: `npm run check`.
-// Copyright (c) 2026 PacificAI. All rights reserved.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';

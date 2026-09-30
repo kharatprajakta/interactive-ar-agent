@@ -6,7 +6,6 @@
 #   - Kokoro voice model   data\kokoro                   -> volume "voice-kokoro"
 # Safe to re-run: it only fills volumes that are still empty.
 # Usage (from the project folder):  powershell -ExecutionPolicy Bypass -File deploy\scripts\seed-volumes.ps1
-# Copyright (c) 2026 PacificAI. All rights reserved.
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $project = 'hellocrew'

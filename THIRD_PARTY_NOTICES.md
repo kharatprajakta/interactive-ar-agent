@@ -1,6 +1,6 @@
 # Third-party notices
 
-Hello Crew is proprietary software of PacificAI (see [LICENSE](LICENSE)). It uses the third-party components below, each under its own license. PacificAI claims no ownership of them. Check each project's current license terms before a commercial release.
+Hello Crew is open source under the [MIT license](LICENSE). It uses the third-party components below, each under its own license, and claims no ownership of them. Check each project's current license terms before a commercial release.
 
 ## Bundled in this repository
 
