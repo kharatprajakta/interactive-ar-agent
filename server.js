@@ -1,7 +1,6 @@
 // Hello Crew web server: serves the front end from ./public, handles accounts
 // and per-user memory (PostgreSQL), runs the persona chat pipeline (Ollama +
 // web search + document RAG), and proxies the Python voice service.
-// Copyright (c) 2026 PacificAI. All rights reserved.
 import http from 'node:http';
 import https from 'node:https';
 import { readFile } from 'node:fs/promises';

@@ -1,12 +1,9 @@
 # syntax=docker/dockerfile:1
 # Hello Crew web app + admin panel (one image, two commands).
-# Copyright (c) 2026 PacificAI. All rights reserved.
 FROM node:24-slim
 
 LABEL org.opencontainers.image.title="Hello Crew" \
-      org.opencontainers.image.description="Hello Crew web app and admin panel" \
-      org.opencontainers.image.vendor="PacificAI" \
-      org.opencontainers.image.licenses="LicenseRef-PacificAI-Proprietary"
+      org.opencontainers.image.description="Hello Crew web app and admin panel"
 
 ENV NODE_ENV=production
 WORKDIR /app

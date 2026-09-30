@@ -1,6 +1,5 @@
 # Checks every push and pull request: code compiles, the Compose files are
 # valid, and all three images build. Nothing is published here (see release.yml).
-# Copyright (c) 2026 PacificAI. All rights reserved.
 name: CI
 
 on:
