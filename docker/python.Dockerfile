@@ -2,11 +2,7 @@
 # Hello Crew Python helpers. Two targets from one file:
 #   voice  - Kokoro TTS + Whisper STT (tts_server.py)
 #   ncert  - NCERT textbook search over ChromaDB (ncert/)
-# Copyright (c) 2026 PacificAI. All rights reserved.
 FROM python:3.12-slim AS base
-
-LABEL org.opencontainers.image.vendor="PacificAI" \
-      org.opencontainers.image.licenses="LicenseRef-PacificAI-Proprietary"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

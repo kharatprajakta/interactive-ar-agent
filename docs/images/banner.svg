@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="Hello Crew: open source AI companions in their own 3D rooms">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#151a27"/>
+      <stop offset="100%" stop-color="#0d0f16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="112%" r="62%">
+      <stop offset="0%" stop-color="#6c8cff" stop-opacity="0.42"/>
+      <stop offset="60%" stop-color="#6c8cff" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#6c8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#b9c6ff"/>
+    </linearGradient>
+    <style>
+      .t { font-family: 'Segoe UI', Inter, Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="420" rx="18" fill="url(#sky)"/>
+  <rect width="1280" height="420" rx="18" fill="url(#glow)"/>
+
+  <g class="t" text-anchor="middle">
+    <text x="640" y="112" font-size="72" font-weight="700" letter-spacing="-1.5" fill="url(#ink)">Hello Crew</text>
+    <text x="640" y="160" font-size="25" font-weight="500" fill="#c3cae0">Eight AI companions, each in their own 3D room. You call them like a video call.</text>
+    <text x="640" y="199" font-size="18.5" font-weight="600" fill="#6c8cff" letter-spacing="2.4">MIT LICENSED  ·  100% ON YOUR MACHINE  ·  HANDS-FREE VOICE  ·  WEBXR AR</text>
+  </g>
+
+  <g class="t" text-anchor="middle" font-size="19" font-weight="700">
+    <g><circle cx="171" cy="296" r="31" fill="#ff7a45" fill-opacity="0.19" stroke="#ff7a45" stroke-width="2"/><text x="171" y="303" fill="#ff7a45">Br</text><text x="171" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Bruno</text><text x="171" y="378" font-size="13" font-weight="500" fill="#69718c">Chef</text></g>
+    <g><circle cx="305" cy="296" r="31" fill="#3fb6ff" fill-opacity="0.19" stroke="#3fb6ff" stroke-width="2"/><text x="305" y="303" fill="#3fb6ff">Ja</text><text x="305" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Jasper</text><text x="305" y="378" font-size="13" font-weight="500" fill="#69718c">Tech</text></g>
+    <g><circle cx="439" cy="296" r="31" fill="#5b7cff" fill-opacity="0.19" stroke="#5b7cff" stroke-width="2"/><text x="439" y="303" fill="#5b7cff">Hu</text><text x="439" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Hugo</text><text x="439" y="378" font-size="13" font-weight="500" fill="#69718c">Fact check</text></g>
+    <g><circle cx="573" cy="296" r="31" fill="#2bb673" fill-opacity="0.19" stroke="#2bb673" stroke-width="2"/><text x="573" y="303" fill="#2bb673">Le</text><text x="573" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Leo</text><text x="573" y="378" font-size="13" font-weight="500" fill="#69718c">Money</text></g>
+    <g><circle cx="707" cy="296" r="31" fill="#ff5d8f" fill-opacity="0.19" stroke="#ff5d8f" stroke-width="2"/><text x="707" y="303" fill="#ff5d8f">Ro</text><text x="707" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Rosie</text><text x="707" y="378" font-size="13" font-weight="500" fill="#69718c">Wellness</text></g>
+    <g><circle cx="841" cy="296" r="31" fill="#9b6bff" fill-opacity="0.19" stroke="#9b6bff" stroke-width="2"/><text x="841" y="303" fill="#9b6bff">Lu</text><text x="841" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Luna</text><text x="841" y="378" font-size="13" font-weight="500" fill="#69718c">Science</text></g>
+    <g><circle cx="975" cy="296" r="31" fill="#f5a524" fill-opacity="0.19" stroke="#f5a524" stroke-width="2"/><text x="975" y="303" fill="#f5a524">Ki</text><text x="975" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Kiki</text><text x="975" y="378" font-size="13" font-weight="500" fill="#69718c">NCERT tutor</text></g>
+    <g><circle cx="1109" cy="296" r="31" fill="#00b3a4" fill-opacity="0.19" stroke="#00b3a4" stroke-width="2"/><text x="1109" y="303" fill="#00b3a4">Be</text><text x="1109" y="358" font-size="15" font-weight="600" fill="#9aa3bd">Bella</text><text x="1109" y="378" font-size="13" font-weight="500" fill="#69718c">Travel</text></g>
+  </g>
+</svg>

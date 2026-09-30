@@ -1,4 +1,4 @@
-// Hello Crew admin panel (front end). Copyright (c) 2026 PacificAI. All rights reserved.
+// Hello Crew admin panel (front end).
 const $ = (id) => document.getElementById(id);
 let current = null; // user shown in the dialog
 let searchTimer = null;

@@ -1,7 +1,6 @@
 # Production overrides: run released images from GHCR instead of building, and
 # publish nothing but what's needed. Use with the base file:
 #   docker compose -f compose.yaml -f deploy/compose.prod.yaml --env-file deploy/production.env --profile public up -d
-# Copyright (c) 2026 PacificAI. All rights reserved.
 services:
   postgres:
     ports: !reset [] # no host access to the database in production

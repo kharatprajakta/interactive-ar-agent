@@ -2,7 +2,6 @@
 #   docker compose up -d --build          # local (this file only)
 #   docker compose -f compose.yaml -f deploy/compose.prod.yaml --profile public up -d   # production
 # Settings come from .env (copy .env.example). See docs/DEPLOYMENT.md.
-# Copyright (c) 2026 PacificAI. All rights reserved.
 name: hellocrew
 
 x-common: &common
